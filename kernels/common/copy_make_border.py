@@ -15,7 +15,7 @@ def _positive_mod(value, period):
 def _border_coordinate(value, extent, MODE: tl.constexpr):
     if MODE == 1:
         return tl.minimum(tl.maximum(value, 0), extent - 1)
-    extent = extent.to(tl.int64)
+    extent = tl.cast(extent, tl.int64)
     if MODE == 2:
         period = 2 * extent
         residue = _positive_mod(value, period)

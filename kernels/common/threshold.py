@@ -7,7 +7,7 @@ import triton.language as tl
 
 @triton.jit
 def _words64(lo, hi):
-    return lo.to(tl.uint32).to(tl.uint64) | (hi.to(tl.uint32).to(tl.uint64) << 32)
+    return tl.cast(lo, tl.uint32).to(tl.uint64) | (tl.cast(hi, tl.uint32).to(tl.uint64) << 32)
 
 
 @triton.jit
@@ -21,8 +21,8 @@ def threshold_apply(src_ptr, dst_ptr, cutoff_ptr, rows, row_values, src_rs, dst_
     valid = row < rows
     value = tl.load(src_ptr + row * src_rs + col, mask=valid, other=0)
     if KIND == 3:
-        cutoff = cut_lo.to(tl.uint32).to(tl.float32, bitcast=True)
-        maximum = max_lo.to(tl.uint32).to(tl.float32, bitcast=True)
+        cutoff = tl.cast(cut_lo, tl.uint32).to(tl.float32, bitcast=True)
+        maximum = tl.cast(max_lo, tl.uint32).to(tl.float32, bitcast=True)
     elif KIND == 4:
         cutoff = _words64(cut_lo, cut_hi).to(tl.float64, bitcast=True)
         maximum = _words64(max_lo, max_hi).to(tl.float64, bitcast=True)
@@ -39,7 +39,7 @@ def threshold_apply(src_ptr, dst_ptr, cutoff_ptr, rows, row_values, src_rs, dst_
         if KIND == 3 or KIND == 4:
             lane_count: tl.constexpr = 4 if KIND == 3 else 2
             tight = (src_rs == row_values) & (dst_rs == row_values)
-            span = tl.where(tight, rows.to(tl.int64) * row_values, row_values)
+            span = tl.where(tight, tl.cast(rows, tl.int64) * row_values, row_values)
             lane = tl.where(tight, index, col)
             # SSE min returns its second operand for equality or a NaN input.
             vector = tl.where(value < cutoff, value, cutoff)
@@ -112,7 +112,7 @@ def threshold_select(workspace_ptr, pixels, BINS: tl.constexpr, TRIANGLE: tl.con
             index = start + lane
             moment += index.to(tl.int64) * tl.load(hist + index).to(tl.int64)
         one = tl.full((), 1.0, tl.float64)
-        scale = one / pixels.to(tl.float64)
+        scale = one / tl.cast(pixels, tl.float64)
         mean = tl.sum(moment, 0).to(tl.float64) * scale
         first_mean = tl.full((), 0.0, tl.float64)
         first_prob = tl.full((), 0.0, tl.float64)

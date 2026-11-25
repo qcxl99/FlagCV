@@ -14,11 +14,11 @@ def _coordinates(position, size, BORDER: tl.constexpr):
     if BORDER == 1:
         return tl.maximum(0, tl.minimum(position, size - 1)), tl.full(position.shape, True, tl.int1)
     if BORDER == 2:
-        period = 2 * size.to(tl.int64)
+        period = 2 * tl.cast(size, tl.int64)
         folded = position % period
         folded = tl.where(folded < 0, folded + period, folded)
         return tl.where(folded >= size, period - 1 - folded, folded), tl.full(position.shape, True, tl.int1)
-    period = tl.maximum(1, 2 * (size.to(tl.int64) - 1))
+    period = tl.maximum(1, 2 * (tl.cast(size, tl.int64) - 1))
     folded = position % period
     folded = tl.where(folded < 0, folded + period, folded)
     return tl.where(folded >= size, period - folded, folded), tl.full(position.shape, True, tl.int1)
@@ -28,7 +28,7 @@ def _coordinates(position, size, BORDER: tl.constexpr):
 def _pixel_indices(width, height, CHANNELS: tl.constexpr, BLOCK: tl.constexpr):
     linear = tl.program_id(0).to(tl.int64) * BLOCK + tl.arange(0, BLOCK).to(tl.int64)
     pixel = linear // CHANNELS
-    return pixel % width, pixel // width, linear % CHANNELS, pixel < width.to(tl.int64) * height
+    return pixel % width, pixel // width, linear % CHANNELS, pixel < tl.cast(width, tl.int64) * height
 
 
 @triton.jit
