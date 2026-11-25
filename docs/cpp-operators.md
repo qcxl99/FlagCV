@@ -54,3 +54,17 @@ flagcv::warpAffine(handle, src, dst, matrix, flagcv::Interpolation::kLinear,
 调用方按所需输出尺寸预分配 `dst`。矩阵按行给出，`inverse_map` 为真时直接
 从目标映射到源坐标。调用方保留句柄、视图存储和原生 stream，直到提交完成。
 仿射路径使用调用方给定的图像存储，暖态每次调用提交一个 kernel。
+
+
+## Resize
+
+`ResizePlan` 在 CPU 解析尺寸并准备系数。构造时提供源尺寸、深度、通道和
+`ResizeOptions`。调用方按 `destination_size()` 分配目标。单图中两个正
+尺寸优先，任一非正时用有限正 `fx/fy` 派生。批量只接受两个正尺寸或
+`{0,0}` 加两个比例，支持等形的 8U C1/C3/C4，输入和输出各自使用字节
+batch pitch。每幅图可以使用独立于 packed width 的行 pitch。
+
+有系数的计划需要把 `table_data()` 的 `table_bytes()` 字节上传到调用方
+分配的设备区域，并保持该区域只读，直到所有使用流完成。调用方负责让上传对
+每条流可见。相同计划和设备副本可直接重复使用。零字节路径传空 workspace。
+`resize` 和 `resizeBatch` 仅提交设备工作，调用方保留句柄、图像和工作区。

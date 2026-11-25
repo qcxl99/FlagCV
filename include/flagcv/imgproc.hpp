@@ -7,6 +7,7 @@
 #include <flagcv/handle.hpp>
 
 #include <array>
+#include <memory>
 
 /*
  * Colour conversion, geometric transforms, filtering, morphology,
@@ -35,6 +36,58 @@ void warpAffine(Handle& handle, const GpuMat& src, const GpuMat& dst,
                 Border border = Border::kConstant,
                 const BorderValue& border_value = {},
                 bool inverse_map = false, Stream stream = nullptr);
+
+// Positive width and height select an explicit size. {0, 0} selects scales.
+struct Size {
+  int width = 0;
+  int height = 0;
+};
+
+// Immutable bytes already uploaded by the caller to this Handle's device.
+struct DeviceWorkspace {
+  const void* data = nullptr;
+  std::size_t bytes = 0;
+};
+
+struct ResizeOptions {
+  Size size;
+  double fx = 0;
+  double fy = 0;
+  Interpolation interpolation = Interpolation::kLinear;
+};
+
+/*
+ * Builds the host interpolation tables once. The caller copies table_data()
+ * to device storage and orders the upload before any stream that uses it.
+ * Keep the host data alive through upload and the device data alive and
+ * immutable until every use completes. Some routes have zero table bytes.
+ */
+class ResizePlan {
+ public:
+  ResizePlan(Size source, Depth depth, int channels, ResizeOptions options);
+  ResizePlan(const ResizePlan&) = default;
+  ResizePlan& operator=(const ResizePlan&) = default;
+
+  Size destination_size() const;
+  const void* table_data() const;
+  std::size_t table_bytes() const;
+
+ private:
+  struct Data;
+  std::shared_ptr<const Data> data_;
+  friend struct ResizeAccess;
+};
+
+// The images and any workspace are preallocated. Calls enqueue on stream.
+void resize(Handle& handle, const GpuMat& src, const GpuMat& dst,
+            const ResizePlan& plan, DeviceWorkspace workspace = {},
+            Stream stream = nullptr);
+
+// A batch contains equal-sized 8U images. Batch pitches are independent bytes.
+void resizeBatch(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                 int count, std::int64_t src_batch_pitch, std::int64_t dst_batch_pitch,
+                 const ResizePlan& plan, DeviceWorkspace workspace = {},
+                 Stream stream = nullptr);
 
 }  // namespace flagcv
 

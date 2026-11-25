@@ -55,6 +55,17 @@ int main() {
     check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
     if (values != std::array<unsigned char, 8>{1, 2, 3, 4, 5, 6, 7, 8})
       throw std::runtime_error("installed warpAffine returned incorrect output");
+    const flagcv::ResizePlan resize_plan({4, 2}, flagcv::Depth::k8U, 1,
+                                        {{2, 1}, 0, 0, flagcv::Interpolation::kNearest});
+    const auto coefficients = allocate(resize_plan.table_bytes());
+    check(cudaMemcpy(coefficients.get(), resize_plan.table_data(), resize_plan.table_bytes(),
+                     cudaMemcpyHostToDevice));
+    const flagcv::GpuMat reduced(dst.get(), 2, 1, flagcv::Depth::k8U, 1);
+    flagcv::resize(handle, src_view, reduced, resize_plan,
+                   {coefficients.get(), resize_plan.table_bytes()});
+    check(cudaMemcpy(values.data(), dst.get(), 2, cudaMemcpyDeviceToHost));
+    if (values[0] != 1 || values[1] != 3)
+      throw std::runtime_error("installed resize returned incorrect output");
     return 0;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
@@ -64,6 +75,9 @@ int main() {
 #else
 int main() {
   const flagcv::GpuMat view(nullptr, 4, 2, flagcv::Depth::k16U, 3);
-  return view.row_pitch() == 24 && view.row_stride() == 12 ? 0 : 1;
+  const flagcv::ResizePlan plan({4, 2}, flagcv::Depth::k8U, 1,
+                               {{2, 1}, 0, 0, flagcv::Interpolation::kNearest});
+  return view.row_pitch() == 24 && view.row_stride() == 12 &&
+             plan.destination_size().width == 2 && plan.table_bytes() != 0 ? 0 : 1;
 }
 #endif

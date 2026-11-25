@@ -65,6 +65,31 @@
       "name": "warp_affine_cubic",
       "source": "common/warpaffine.py",
       "function": "_warp_cubic"
+    },
+    {
+      "name": "resize_copy",
+      "source": "common/resize.py",
+      "function": "_resize_copy"
+    },
+    {
+      "name": "resize_nearest",
+      "source": "common/resize.py",
+      "function": "_resize_cpu_nearest_kernel"
+    },
+    {
+      "name": "resize_separable",
+      "source": "common/resize.py",
+      "function": "_resize_cpu_sep_kernel"
+    },
+    {
+      "name": "resize_area_fast",
+      "source": "common/resize.py",
+      "function": "_resize_cpu_area_fast_kernel"
+    },
+    {
+      "name": "resize_area",
+      "source": "common/resize.py",
+      "function": "_resize_cpu_area_kernel"
     }
   ]
 }

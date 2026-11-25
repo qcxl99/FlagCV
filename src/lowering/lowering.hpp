@@ -103,6 +103,10 @@ LoweredOp lower_warp_affine(const GpuMat& src, const GpuMat& dst,
                            Border border, const BorderValue& border_value,
                            bool inverse_map);
 
+LoweredOp lower_resize(const GpuMat& src, const GpuMat& dst, const ResizePlan& plan,
+                        DeviceWorkspace workspace, int count,
+                        std::int64_t src_pitch, std::int64_t dst_pitch, bool batch);
+
 }  // namespace flagcv
 
 #endif  // FLAGCV_SRC_LOWERING_LOWERING_HPP_

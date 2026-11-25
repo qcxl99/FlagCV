@@ -97,10 +97,12 @@ std::string read_file(const std::string& path) {
                      std::istreambuf_iterator<char>());
 }
 
-/* One grid dimension: a fixed extent, or ceil(product of params / block). */
+/* A fixed extent or a product of tiled dimensions. The result can be
+ * divided into blocks and capped for a kernel that folds a grid axis. */
 struct GridDim {
   std::int64_t fixed = 1;
   std::vector<std::size_t> product;
+  std::vector<std::int64_t> factor_blocks;
   std::int64_t block = 1;
   std::int64_t limit = std::numeric_limits<std::int64_t>::max();
 };
@@ -347,6 +349,16 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
           throw Error("flagcv: grid refers to unknown param '" + name + "'");
         loaded.grid[d].product.push_back(std::distance(op.params.begin(), param));
       }
+      if (grid[d].has("factor_blocks")) {
+        const auto& blocks = grid[d].at("factor_blocks").as_array();
+        if (blocks.size() != loaded.grid[d].product.size())
+          throw Error("flagcv: grid factor count does not match product");
+        for (const auto& item : blocks) {
+          const auto block = item.as_int();
+          if (block <= 0) throw Error("flagcv: invalid grid factor block");
+          loaded.grid[d].factor_blocks.push_back(block);
+        }
+      }
       loaded.grid[d].block = grid[d].at("block").as_int();
       if (grid[d].has("limit")) loaded.grid[d].limit = grid[d].at("limit").as_int();
     }
@@ -369,11 +381,15 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
     std::int64_t extent = kernel.grid[d].fixed;
     if (!kernel.grid[d].product.empty()) {
       std::int64_t total = 1;
-      for (const auto index : kernel.grid[d].product) {
-        const auto value = op.params[index].value;
-        if (value <= 0 || total > std::numeric_limits<std::int64_t>::max() / value)
-          throw Error("flagcv: invalid launch grid parameter");
-        total *= value;
+      const auto& dimension = kernel.grid[d];
+      for (std::size_t i = 0; i < dimension.product.size(); ++i) {
+        const auto value = op.params[dimension.product[i]].value;
+        if (value <= 0) throw Error("flagcv: invalid launch grid parameter");
+        const auto block = dimension.factor_blocks.empty() ? 1 : dimension.factor_blocks[i];
+        const auto tiles = value / block + (value % block != 0);
+        if (total > std::numeric_limits<std::int64_t>::max() / tiles)
+          throw Error("flagcv: launch grid product overflows");
+        total *= tiles;
       }
       const auto block = kernel.grid[d].block;
       if (block <= 0) throw Error("flagcv: invalid launch grid block size");

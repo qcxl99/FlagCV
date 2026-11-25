@@ -18,7 +18,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE))
 from helpers.benchmark_protocol import PROFILES
 
-NVIDIA_TESTS = {"flagcv.nvidia.public_api", "flagcv.nvidia.platform_failure", "flagcv.nvidia.warpaffine"}
+NVIDIA_TESTS = {"flagcv.nvidia.public_api", "flagcv.nvidia.platform_failure", "flagcv.nvidia.warpaffine", "flagcv.nvidia.resize"}
 
 
 def check_junit(path, expected=None):

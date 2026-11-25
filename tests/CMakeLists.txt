@@ -29,6 +29,17 @@ add_test(NAME flagcv.runtime COMMAND flagcv_test_runtime "${fixture}")
 set_tests_properties(flagcv.runtime PROPERTIES LABELS "host" TIMEOUT 60
   ENVIRONMENT "FLAGCV_PLUGIN_DIR=$<TARGET_FILE_DIR:flagcv_testfixture>;FLAGCV_DATA_DIR=${fixture}")
 
+function(flagcv_add_resize_test target backend runtime)
+  add_executable(${target} cpp/test_resize.cpp cpp/resize_reference.cpp)
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${PROJECT_SOURCE_DIR}")
+  target_link_libraries(${target} PRIVATE flagcv opencv_core opencv_imgproc ${runtime})
+  target_compile_features(${target} PRIVATE cxx_std_17)
+  target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-ffp-contract=off>)
+  flagcv_enable_warnings(${target})
+  add_test(NAME flagcv.${backend}.resize COMMAND ${target})
+  set_tests_properties(flagcv.${backend}.resize PROPERTIES LABELS "${backend};gpu" TIMEOUT 420)
+endfunction()
+
 option(FLAGCV_TEST_NVIDIA "Run public C++ API tests with NVIDIA and OpenCV CPU" OFF)
 set(FLAGCV_TEST_NVIDIA_DEVICES "1" CACHE STRING "Number of visible NVIDIA test devices")
 
@@ -71,6 +82,8 @@ if(FLAGCV_TEST_NVIDIA)
   add_test(NAME flagcv.nvidia.warpaffine COMMAND flagcv_test_warpaffine)
   set_tests_properties(flagcv.nvidia.warpaffine PROPERTIES LABELS "nvidia;gpu" TIMEOUT 420)
 
+  flagcv_add_resize_test(flagcv_test_resize nvidia CUDA::cudart)
+
   set(overlay "${CMAKE_CURRENT_BINARY_DIR}/nvidia-test-data")
   file(MAKE_DIRECTORY "${overlay}/backends/nvidia/kernels")
   file(CREATE_LINK "${PROJECT_SOURCE_DIR}/compiler" "${overlay}/compiler" SYMBOLIC)
@@ -105,6 +118,9 @@ if(FLAGCV_TEST_HIP)
   flagcv_enable_warnings(flagcv_test_warpaffine_hip)
   add_test(NAME flagcv.hip.warpaffine COMMAND flagcv_test_warpaffine_hip)
   set_tests_properties(flagcv.hip.warpaffine PROPERTIES LABELS "hip;gpu" TIMEOUT 420)
+
+  flagcv_add_resize_test(flagcv_test_resize_hip hip hip::host)
+  target_compile_definitions(flagcv_test_resize_hip PRIVATE FLAGCV_TEST_HIP=1)
 
   add_executable(flagcv_test_hip cpp/test_nvidia.cpp)
   target_include_directories(flagcv_test_hip PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

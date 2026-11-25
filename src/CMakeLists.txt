@@ -5,9 +5,12 @@ add_library(flagcv
   core/bitwise.cpp
   core/flip.cpp
   image/gpumat.cpp
+  imgproc/resize.cpp
+  imgproc/resize_tables.cpp
   imgproc/warpaffine.cpp
   lowering/flip.cpp
   lowering/pointwise.cpp
+  lowering/resize.cpp
   lowering/warpaffine.cpp
   runtime/compiler_client.cpp
   runtime/json.cpp
@@ -35,6 +38,8 @@ target_compile_definitions(flagcv PRIVATE
 target_link_libraries(flagcv PRIVATE ${CMAKE_DL_LIBS})
 target_compile_features(flagcv PUBLIC cxx_std_17)
 flagcv_enable_warnings(flagcv)
+set_property(SOURCE imgproc/resize_tables.cpp APPEND PROPERTY COMPILE_OPTIONS
+  $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-ffp-contract=off>)
 set_target_properties(flagcv PROPERTIES VERSION "${PROJECT_VERSION}"
   SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
