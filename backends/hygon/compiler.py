@@ -28,4 +28,11 @@ def identify():
 
 def compile(request):
     tuning, num_warps, grid, _ = compile_with_plan(request)
+    # gfx936 has 64 lanes per wave. A 128-element F32 C3 correlation
+    # block uses two waves; other targets and data routes keep their plan.
+    if (request["target"] == "hip:gfx936:64"
+            and request["kernel"] == "filter2d_direct"
+            and request["images"][0]["depth"] == "32F"
+            and request["images"][0]["channels"] == 3):
+        num_warps = 2
     return compile_kernel(request, tuning, num_warps, grid)

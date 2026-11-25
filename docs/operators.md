@@ -38,7 +38,6 @@ CUDA 逐例基线覆盖已核对的共同支持范围。16F、C++ 掩码、原�
 | --- | --- | --- |
 | 1 | `bitwise_or`、`bitwise_xor`、`compare`、`min`、`max` | OR/XOR/min/max 有独立评测 PR 提案；公开 API 和验收待接入 |
 | 2 | `warpPerspective`、`remap` | 优先复用已有 Triton 和 OpenCV 工作；按插值及边界模式建立 CPU 和 CUDA 基线 |
-| 3 | `GaussianBlur`、`filter2D` | 按边界策略和采样规则建立参考样本 |
 
 AMD 新工具链与新设备继续按 HIP 交付流程验证。[AMD PR #3](https://github.com/flagos-ai/FlagCV/pull/3)
 
@@ -50,3 +49,5 @@ AMD 新工具链与新设备继续按 HIP 交付流程验证。[AMD PR #3](https
 | `threshold` | 五种固定模式，8U/16U/16S/32F/64F。Otsu 支持 U8/U16 C1，Triangle 支持 U8 C1。自动模式提供设备结果与返回主机值的同步入口。 | 同上，含独立 OpenCV CPU 及阈值返回值检查 |
 
 主题的设备和性能证据按实际平台与执行入口提交。FP32/FP64 参考采用固定 SSE3 OpenCV。
+
+GaussianBlur 与 filter2D 的已接入范围和资源寿命见 [空间滤波](spatial-filters.md)。
