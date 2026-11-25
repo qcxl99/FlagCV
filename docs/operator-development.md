@@ -8,7 +8,7 @@ C++ 接口与内存、stream 的约定见 [C++ operator interfaces](cpp-operator
 
 ```text
 include/flagcv/{core,imgproc}.hpp       声明公开接口
-  -> src/{core,imgproc}/<family>.cpp   调用对应 lowering，传设备指针和 stream
+  -> src/{core,imgproc}/<family>.cpp   调用对应 lowering，传算子描述和 stream
   -> src/lowering/<family>.cpp        校验操作数，构造 LoweredOp
   -> src/runtime/runtime.cpp          查缓存、解析 registry、请求编译、加载和 launch
        -> compiler/flagcv_codegen/main.py
@@ -57,7 +57,7 @@ void bitwise_and(Handle& handle, const GpuMat& src1, const GpuMat& src2,
 `require_same_layout()` 等校验辅助函数。公开 API 的 pitch 单位是字节；
 `GpuMat::row_stride()` 转换后的 `ImageSpec::row_stride` 单位是元素。
 
-`LoweredOp` 保存 kernel 注册名、图像描述和参数，不保存设备指针。例如逐元素
+`LoweredOp` 保存 kernel 注册名、按 kernel 参数顺序排列的图像描述（含设备地址）和参数。例如逐元素
 操作可以按下列顺序构造参数（省略前面的校验）：
 
 ```cpp
@@ -89,18 +89,17 @@ op.add_constexpr("CHANNELS", s1.channels);
 
 在 `src/core/<family>.cpp` 或 `src/imgproc/<family>.cpp` 实现公开函数，包含
 公开头文件、`src/lowering/lowering.hpp` 和 `src/runtime/runtime.hpp`。
-入口只负责调用 lowering、组装指针并传递 stream。现有代码的形式如下：
+入口调用 lowering，将图像描述、参数和 stream 传给 runtime。现有代码的形式如下：
 
 ```cpp
 void bitwise_and(Handle& handle, const GpuMat& src1, const GpuMat& src2,
                  const GpuMat& dst, Stream stream) {
-  const LoweredOp op = lower_pointwise(src1, src2, dst, PointwiseMode::kAnd);
-  launch(handle, op, {src1.data(), src2.data(), dst.data()}, stream);
+  launch_pointwise(handle, src1, src2, dst, nullptr, PointwiseMode::kAnd,
+                   stream);
 }
 ```
 
-指针列表必须与 `op.images` 的顺序和数量一致。入口不分配设备内存，不调用
-Python wrapper，也不自行同步。操作数校验留在 lowering，平台调优留在 provider。
+runtime 按 `op.images` 的声明顺序生成设备参数。操作数校验留在 lowering，平台调优留在 provider。
 
 ## 4. Triton kernel：提供可编译的参数签名
 
@@ -191,29 +190,14 @@ PLANS["my_op"] = plan_my_op
 如果扩展已有族文件，无需重复添加。头文件由现有安装规则导出，通用 Python kernel
 也由现有 `kernels/common/` 安装规则打包。
 
-C++ 精度测试放在 `tests/test_<family>.cpp`，CPU 标量参考放在
-`reference/cpu/`，容差规则见 [数值容差策略](numerical-tolerance.md)。在
-`tests/CMakeLists.txt` 调用 `flagcv_add_test(<family>)`，并链接测试分配显存所需的
-设备 runtime，依赖对应 backend plugin。已有测试配置以 CUDA runtime 为例；
-迁移到其他设备时，测试的内存分配、拷贝、stream 和同步也要相应接入。
+C++ 精度测试通过公开 API 调用，在 `tests/cpp` 接入 OpenCV CPU 参考和
+对应平台的显存、拷贝及 stream。Python 测试使用该算子的 OpenCV CPU 参考。
+按 dtype、通道、尺寸、pitch、ROI、mask、边界和 stream 建矩阵，单独比较输入
+与输出 guard 字节。NVIDIA 以真实 OpenCV CUDA 调用建立 C++ 和 Python 的独立
+性能基线。提交时同步登记算子清单和逐用例性能证据。
 
-在隔离设备的环境中，从公开 C++ 接口运行测试，验证首次编译加载、缓存复用和
-GPU 输出对比。用例应包含边界尺寸、支持的 depth/通道、不同 pitch、偏移指针、
-输入与 padding 保护、重叠限制和非默认 stream。另跑原 Python 用例，确认 wrapper
-保留兼容。Python 性能测试默认现场执行 OpenCV CUDA 基线；新增算子需在
-`adapters/opencv_cuda/bridge.cpp` 添加真实 OpenCV 调用，并在
-`adapters/opencv_cuda.py` 接入参数映射。对应流程见
-[OpenCV CUDA reference](opencv-add-reference.md)。其他后端可显式使用
-`--baseline none` 测量 candidate。测量数据不写入本文档。
-
-NVIDIA 环境下的构建与调用链检查示例：
-
-```bash
-cmake -S . -B build -DBUILD_SHARED_LIBS=ON -DFLAGCV_BUILD_TESTS=ON \
-  -DFLAGCV_BACKENDS=nvidia -DFLAGCV_WARNINGS_AS_ERRORS=ON
-cmake --build build -j 8
-CUDA_VISIBLE_DEVICES=0 ctest --test-dir build --output-on-failure
-```
+完整检查和复跑见 [NVIDIA 验收](nvidia-validation.md)，合入要求见
+[FlagCV 合入标准](../CONTRIBUTING.md)。
 
 ## 扩展 mask 和标量时的约定
 

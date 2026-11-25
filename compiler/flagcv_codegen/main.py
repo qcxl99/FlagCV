@@ -27,6 +27,10 @@ failure carries ``error`` instead of a result. Requests:
           "grid": [{"product": ["width", "CHANNELS"], "block": 512},
                    {"product": ["height"], "block": 4}, 1]}
 
+For a grid dimension with a product, an optional positive ``limit`` caps
+the computed extent. The provider can use another dimension to cover the
+remaining tiles, as the CUDA pitched kernels do for images with many rows.
+
 Runtime parameter values never reach this process: only their types do, so a
 new image size reuses the compiled artifact. Each platform provider lives in
 backends/<platform>/compiler.py and implements identify() and compile().

@@ -1,12 +1,7 @@
-"""Torch reference for saturating OpenCV subtraction."""
+"""OpenCV CPU saturating subtraction."""
+
+from ._opencv import evaluate
 
 
 def reference(a, b, dst):
-    import torch
-
-    if a.dtype == torch.uint8:
-        values = (a.to(torch.int16) - b.to(torch.int16)).clamp_(0, 255)
-    else:
-        values = a - b
-    dst.copy_(values)
-    return dst
+    return evaluate("subtract", (a, b), dst)

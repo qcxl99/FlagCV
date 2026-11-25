@@ -18,7 +18,7 @@ def suite(pytester, monkeypatch):
     monkeypatch.delenv("GEMS_VENDOR", raising=False)
     pytester.makeini("[pytest]\naddopts = --device cpu")
     reference_dir = pytester.mkdir("reference")
-    for name in ("__init__.py", "add.py"):
+    for name in ("__init__.py", "_opencv.py", "add.py"):
         (reference_dir / name).write_text((ROOT / "reference" / name).read_text())
     pytester.makeconftest(
         (ROOT / "conftest.py").read_text()

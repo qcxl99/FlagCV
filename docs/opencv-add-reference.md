@@ -10,7 +10,7 @@ validation dependency; the production FlagCV library does not link OpenCV.
 
 Use an OpenCV build with CUDA and the contrib `cudaarithm` module, compiled for
 the target GPU. A CPU-only OpenCV installation or Python wheel is insufficient.
-The bridge links the C++ library directly and does not import `cv2`.
+The bridge links OpenCV C++ directly. Python correctness separately imports `cv2` for its CPU reference.
 
 ```sh
 cmake -S adapters/opencv_cuda -B build-opencv-cuda \
@@ -39,7 +39,7 @@ CUDA_VISIBLE_DEVICES=0 python -m pytest benchmark/test_subtract_benchmark.py \
 ```
 
 The default `--baseline opencv-cuda` requires the NVIDIA backend and an available
-bridge. It validates both outputs against the operator's Torch reference and
+bridge. It validates both outputs against OpenCV CPU and
 each other, checks input preservation, then alternates candidate and OpenCV
 measurements with the same Triton event timer. Failures are reported directly;
 there is no CPU or historical-data fallback. Inputs and outputs are allocated

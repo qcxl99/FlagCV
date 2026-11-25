@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,9 @@ def pytest_addoption(parser):
     )
     group.addoption("--dummy-candidate", choices=OPERATORS)
     group.addoption("--dummy-report", type=Path)
+    group.addoption(
+        "--builtin", action="store_true", help="Use the in-tree Triton kernels"
+    )
     group.addoption("--ref-as-candidate", action="store_true")
     group.addoption("--list-cases", action="store_true")
     group.addoption("--profile-only", action="store_true")
@@ -76,10 +80,10 @@ def pytest_configure(config):
     def enabled(name):
         return bool(config.getoption(name))
 
-    modes = ("override", "dummy_candidate", "ref_as_candidate", "list_cases")
+    modes = ("override", "builtin", "dummy_candidate", "ref_as_candidate", "list_cases")
     if sum(enabled(mode) for mode in modes) > 1:
         raise pytest.UsageError(
-            "Choose one of --override, --dummy-candidate, "
+            "Choose one of --override, --builtin, --dummy-candidate, "
             "--ref-as-candidate or --list-cases"
         )
     if enabled("dummy_report") and not enabled("dummy_candidate"):
@@ -100,8 +104,8 @@ def pytest_configure(config):
             )
         if len(selected) != 1:
             raise pytest.UsageError("--profile-only requires exactly one --case-id")
-        if not enabled("override"):
-            raise pytest.UsageError("--profile-only requires --override")
+        if not (enabled("override") or enabled("builtin")):
+            raise pytest.UsageError("--profile-only requires --override or --builtin")
     if (
         config.getoption("profile_warmup") < 0
         or config.getoption("profile_iterations") < 1
@@ -125,6 +129,7 @@ def pytest_configure(config):
     config.pluginmanager.register(config._evaluation, "flagcv-evaluation")
 
 
+@lru_cache(maxsize=None)
 def _load_callable(path, name):
     spec = importlib.util.spec_from_file_location("_flagcv_evaluation_external", path)
     if spec is None or spec.loader is None:
@@ -310,6 +315,7 @@ class Evaluation:
             self.config.getoption(name)
             for name in (
                 "override",
+                "builtin",
                 "dummy_candidate",
                 "ref_as_candidate",
                 "profile_only",
@@ -321,6 +327,7 @@ class Evaluation:
         )
         if (
             validating
+            and (operator or operator_marks or len(OPERATORS) == 1)
             and report.passed
             and (not self.calls or (requires_timing and not self.timings))
         ):
@@ -463,10 +470,10 @@ def candidate(request):
     config = request.config
     if not any(
         config.getoption(name)
-        for name in ("dummy_candidate", "ref_as_candidate", "override")
+        for name in ("dummy_candidate", "ref_as_candidate", "override", "builtin")
     ):
         pytest.skip(
-            "Select a candidate with --override, --dummy-candidate "
+            "Select a candidate with --builtin, --override, --dummy-candidate "
             "or --ref-as-candidate"
         )
     operator = _test_operator(request.node)
@@ -481,6 +488,9 @@ def candidate(request):
         reference = get_reference(operator, runtime.device)
         request.node._reference_declared = True
         return state.observe(reference, "reference")
+    if config.getoption("builtin"):
+        module = _ROOT / "kernels" / "common" / f"{operator}.py"
+        return state.observe(_load_callable(module, operator), "builtin")
     function = request.getfixturevalue("_override_candidates").get(operator)
     if function is None:
         raise pytest.UsageError(f"No --override supplied for {operator!r}")

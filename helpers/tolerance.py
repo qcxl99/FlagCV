@@ -39,4 +39,6 @@ def assert_relative_close(actual, expected):
     import torch
 
     dtype = str(expected.dtype).removeprefix("torch.")
-    torch.testing.assert_close(actual, expected, **_TOLERANCE["relative"][dtype])
+    torch.testing.assert_close(
+        actual, expected, equal_nan=True, **_TOLERANCE["relative"][dtype]
+    )

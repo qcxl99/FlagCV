@@ -6,7 +6,6 @@
 #include <flagcv/types.hpp>
 
 #include <cstdint>
-#include <string>
 
 namespace flagcv {
 
@@ -17,7 +16,8 @@ namespace flagcv {
  * because kernel pointers are typed by pixel depth and advance in elements.
  */
 struct ImageSpec {
-  std::string name;
+  const char* name = nullptr;
+  std::uint64_t address = 0;
   std::int32_t width = 0;
   std::int32_t height = 0;
   Depth depth = Depth::k8U;

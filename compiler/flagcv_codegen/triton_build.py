@@ -19,6 +19,7 @@ from pathlib import Path
 
 import triton
 from triton.backends.compiler import GPUTarget
+from triton.runtime.cache import triton_key
 
 from flagcv_codegen import platform as platforms
 
@@ -85,7 +86,7 @@ def digest(provider_file, backend):
     """Hash everything that can change generated code for this provider."""
     h = hashlib.sha256()
     h.update(sys.version.encode())
-    h.update(triton.__version__.encode())
+    h.update(triton_key().encode())
     files = [Path(provider_file)]
     files += sorted(Path(__file__).parent.glob("*.py"))
     files += registry_sources(backend)
@@ -160,6 +161,10 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         constexprs[name] = value
 
     target = parse_target(request["target"])
+    if target.backend != facts["triton_backend"] or target.warp_size != facts["warp"]:
+        raise ValueError(
+            f"{request['backend']} cannot compile target {request['target']!r}"
+        )
     backend = triton.compiler.make_backend(target)
     options = backend.parse_options({"num_warps": num_warps, "num_stages": num_stages})
     # Deliberately no fn.create_binder(): it probes the active driver, which

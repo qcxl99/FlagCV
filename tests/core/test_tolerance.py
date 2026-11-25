@@ -29,7 +29,7 @@ def test_one_lsb_accepts_one_level_without_wraparound():
 
 @pytest.mark.parametrize(
     "dtype, within, outside",
-    [("float32", 1.000008, 1.00002), ("float16", 1.008, 1.02)],
+    [("float32", 1.000008, 1.00002), ("float16", 1.0, 1.001)],
 )
 def test_relative_threshold_by_dtype(dtype, within, outside):
     torch = pytest.importorskip("torch")

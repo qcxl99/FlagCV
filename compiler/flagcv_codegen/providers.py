@@ -31,6 +31,13 @@ def _power_of_two_at_most(value, floor=64):
     return block
 
 
+def _grid_width(request):
+    for param in request["params"]:
+        if param["name"] == "VEC4" and param["value"]:
+            return ["width"]
+    return ["width", "CHANNELS"]
+
+
 def plan_flip(request, facts=None):
     """Tile for flip: BLOCK_X channel values per program along a row.
 
@@ -46,18 +53,38 @@ def plan_flip(request, facts=None):
     if facts["warp"] == 1:  # Ascend has no SIMT warps: one block per program row
         block_y = 1
     grid = [
-        {"product": ["width", "CHANNELS"], "block": block_x},
+        {"product": _grid_width(request), "block": block_x},
         {"product": ["height"], "block": block_y},
         1,
     ]
     num_warps = min(4, facts["max_warps"])
-    return {"BLOCK_X": block_x, "BLOCK_Y": block_y}, num_warps, grid
+    tuning = {"BLOCK_X": block_x, "BLOCK_Y": block_y, "ROW_GRID_LIMIT": 0}
+    return tuning, num_warps, grid
 
 
-# These kernels share flip's row/column tiling and CHANNELS grid parameter.
+def plan_pointwise(request, facts=None):
+    tuning, warps, grid = plan_flip(request, facts)
+    packed = any(
+        param["name"] == "PACKED" and param["value"] for param in request["params"]
+    )
+    if packed:
+        tuning["BLOCK_Y"] = 1
+        grid = [
+            {"product": [*_grid_width(request), "height"], "block": tuning["BLOCK_X"]},
+            1,
+            1,
+        ]
+    return tuning, warps, grid
+
+
 PLANS = dict.fromkeys(
-    ("flip", "add", "subtract", "multiply", "bitwise_and", "bitwise_not"), plan_flip
+    (
+        "add", "subtract", "multiply", "bitwise_and", "bitwise_not",
+        "add_masked", "subtract_masked", "bitwise_and_masked", "bitwise_not_masked",
+    ),
+    plan_pointwise,
 )
+PLANS["flip"] = plan_flip
 
 
 def compile_with_plan(request):

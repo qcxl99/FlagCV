@@ -1,9 +1,8 @@
 # FlagCV Architecture
 
 FlagCV is an image processing library with OpenCV-shaped interfaces and
-FlagDNN-shaped multi-backend plumbing. It runs in **immediate mode** only: a
-call does its work and returns. There is no graph to build, no compile step the
-caller drives, and no cross-operator fusion.
+FlagDNN-shaped multi-backend plumbing. The public API immediately enqueues one operator on a caller-owned native
+stream. The runtime invokes compilation on a cache miss.
 
 ## Layers
 
@@ -64,22 +63,23 @@ documented in `compiler/flagcv_codegen/main.py`.
 **Cache key.** Kernel name, each image's depth, channel count and whether its
 base pointer is 16-byte aligned, compile-time param values, runtime param
 types, the device, and the compiler identity (a digest of the interpreter,
-Triton version, provider and every registered kernel source). Image sizes and
+Triton compiler key, provider and every registered kernel source). Image sizes and
 strides are runtime params, so a new size reuses the kernel. A runtime param
 the lowering marks with `add_hinted_param` is also specialised on
 divisibility by 16, as Triton's own JIT does, so row accesses can vectorise.
 
 **Files.** Compiled binaries go to `$FLAGCV_CACHE_DIR/artifacts/<hash>/`
 (default `~/.cache/flagcv`); Triton's own cache (`~/.triton/cache`) holds the
-intermediate IR. The runtime's kernel cache lives in memory per `Handle`, so
+intermediate IR. Loaded modules and launch metadata live per `Handle`. Artifact identity uses
+Triton's target, compiler, option and signature key. Therefore
 a new host process restarts the compiler process. Triton can reuse cached
 compilation artifacts, but the compiler process must start and import Triton
 again.
 
 **Locations and overrides.** `FLAGCV_PYTHON` selects the interpreter for the
 compiler process (default `python3`). Kernels, the compiler and platform
-providers are found under `FLAGCV_DATA_DIR`, else `../share/flagcv` next to
-libflagcv, else the source tree it was built from. Plugins are found under
+providers are found under `FLAGCV_DATA_DIR`, else the installed data directory
+relative to libflagcv, else the source tree it was built from. Plugins are found under
 `FLAGCV_PLUGIN_DIR`, else `flagcv/` next to libflagcv, else the build tree.
 
 ## Units: pitch vs stride
@@ -95,8 +95,7 @@ carries, kernel arguments — is in elements.
 
 ## Masks
 
-A mask means "do not write", not "write zero". Destination pixels the mask
-excludes keep their prior contents byte-identical. Kernels implement this by
+Where the mask is zero, the destination keeps its prior contents byte-identical. Kernels implement this by
 folding the mask into the store predicate, never with
 `tl.where(mask, result, 0)`. A masked call therefore requires an initialized
 `dst`.
@@ -105,7 +104,7 @@ folding the mask into the store predicate, never with
 
 FlagCV never allocates or frees device memory. `GpuMat` is a non-owning view
 over a buffer the caller owns — unlike `cv::cuda::GpuMat`, which owns its
-data. Lifetime is the caller's problem.
+data. The caller keeps all buffers, the stream and the Handle alive until the enqueued work completes.
 
 ## Plugin boundary
 
@@ -140,5 +139,10 @@ build for a device it never touches. The platform facts the compiler needs —
 artifact format, Triton backend name, element-block and warp limits — are in
 `compiler/flagcv_codegen/platform.py`.
 
-Only the NVIDIA backend has been compiled and run; the other five follow the
-same contract but have not been built against their SDKs here.
+NVIDIA is validated for this release. The other plugin sources and AMD PR #3
+are tracked in the operator inventory for follow-up platform qualification.
+
+The runtime and provider split follows the FlagDNN approach. Python operator
+evaluation retains the case, candidate and JSON interfaces used by FlagGems.
+[FlagDNN](https://github.com/flagos-ai/FlagDNN) ·
+[FlagGems](https://github.com/flagos-ai/FlagGems)

@@ -2,6 +2,7 @@
 
 #include <flagcv/gpumat.hpp>
 
+#include <limits>
 #include <stdexcept>
 
 namespace flagcv {
@@ -44,8 +45,13 @@ std::int64_t GpuMat::row_pitch() const {
   if (row_pitch_ != 0) {
     return row_pitch_;
   }
-  return static_cast<std::int64_t>(width_) * channels_ *
-         static_cast<std::int64_t>(depth_size(depth_));
+  const auto elements = std::int64_t{width_} * channels_;
+  const auto bytes = static_cast<std::int64_t>(depth_size(depth_));
+  if (elements > std::numeric_limits<std::int64_t>::max() / bytes ||
+      elements < std::numeric_limits<std::int64_t>::min() / bytes) {
+    throw std::invalid_argument("packed row pitch overflows");
+  }
+  return elements * bytes;
 }
 
 std::int64_t GpuMat::row_stride() const {

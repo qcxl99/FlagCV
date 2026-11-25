@@ -21,7 +21,10 @@ target_include_directories(flagcv
 
 # Build-tree fallbacks for locating kernels, the compiler and plugins; the
 # install tree is found relative to the library itself (src/runtime/paths.hpp).
+file(RELATIVE_PATH FLAGCV_DATA_FROM_LIBDIR
+  "${CMAKE_INSTALL_FULL_LIBDIR}" "${CMAKE_INSTALL_FULL_DATADIR}/flagcv")
 target_compile_definitions(flagcv PRIVATE
+  FLAGCV_DATA_FROM_LIBDIR="${FLAGCV_DATA_FROM_LIBDIR}"
   FLAGCV_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
   FLAGCV_PLUGIN_BUILD_DIR="${FLAGCV_PLUGIN_OUTPUT_DIR}")
 
@@ -30,6 +33,8 @@ target_compile_definitions(flagcv PRIVATE
 target_link_libraries(flagcv PRIVATE ${CMAKE_DL_LIBS})
 target_compile_features(flagcv PUBLIC cxx_std_17)
 flagcv_enable_warnings(flagcv)
+set_target_properties(flagcv PROPERTIES VERSION "${PROJECT_VERSION}"
+  SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 install(TARGETS flagcv EXPORT FlagCVTargets)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/" TYPE INCLUDE)

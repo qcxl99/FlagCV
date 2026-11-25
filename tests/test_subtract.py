@@ -5,7 +5,7 @@ from functools import partial
 import pytest
 
 from helpers.correctness import check
-from helpers.tolerance import assert_one_lsb, assert_relative_close
+from helpers.tolerance import assert_exact, assert_relative_close
 from workloads.subtract import CORRECTNESS_CASES, OP_NAME, case_id, make_inputs
 
 
@@ -27,7 +27,7 @@ def test_subtract(
     shape, dtype, fixed_inputs, candidate, native_reference, pytestconfig
 ):
     case = (shape, dtype, fixed_inputs)
-    assert_output = assert_one_lsb if dtype == "uint8" else assert_relative_close
+    assert_output = assert_exact if dtype == "uint8" else assert_relative_close
     check(
         OP_NAME,
         partial(make_inputs, case),

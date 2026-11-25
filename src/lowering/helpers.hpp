@@ -8,6 +8,7 @@
 #include "src/image/types.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -22,53 +23,90 @@ namespace flagcv {
  * pointer that is not aligned to the pixel depth (a typed device load from it
  * would fault).
  */
-inline ImageSpec to_spec(const GpuMat& image, const std::string& name) {
+inline ImageSpec to_spec(const GpuMat& image, const char* name) {
   if (image.empty()) {
-    throw std::invalid_argument("operand '" + name + "' must not be empty");
+    throw std::invalid_argument(std::string("operand '") + name + "' must not be empty");
   }
   if (image.width() <= 0 || image.height() <= 0 || image.channels() <= 0) {
-    throw std::invalid_argument("operand '" + name +
+    throw std::invalid_argument(std::string("operand '") + name +
                                 "' must have positive width, height and "
                                 "channels");
   }
   const auto address = reinterpret_cast<std::uintptr_t>(image.data());
   if (address % depth_size(image.depth()) != 0) {
-    throw std::invalid_argument("operand '" + name +
+    throw std::invalid_argument(std::string("operand '") + name +
                                 "' data is not aligned to its pixel depth");
   }
   ImageSpec spec;
   spec.name = name;
+  spec.address = address;
   spec.width = image.width();
   spec.height = image.height();
   spec.depth = image.depth();
   spec.channels = image.channels();
   spec.row_stride = image.row_stride();
   if (spec.row_stride < std::int64_t{spec.width} * spec.channels) {
-    throw std::invalid_argument("operand '" + name +
+    throw std::invalid_argument(std::string("operand '") + name +
                                 "' row pitch is shorter than one row");
+  }
+  const auto element_size = static_cast<std::int64_t>(depth_size(image.depth()));
+  const auto pitch = image.row_pitch();
+  const auto row_bytes = std::int64_t{spec.width} * spec.channels * element_size;
+  const auto rows_before_last = spec.height - 1;
+  if (rows_before_last > (std::numeric_limits<std::int64_t>::max() - row_bytes) / pitch ||
+      static_cast<std::uint64_t>(rows_before_last * pitch + row_bytes) >
+          std::numeric_limits<std::uintptr_t>::max() - address) {
+    throw std::invalid_argument(std::string("operand '") + name + "' address range overflows");
   }
   return spec;
 }
 
-/*
- * True when the byte ranges two images occupy intersect. Kernels that read
- * one pixel and write another cannot run in place, so their lowering rejects
- * overlap instead of producing an order-dependent result.
- */
+inline bool same_view(const GpuMat& a, const GpuMat& b) {
+  return a.data() == b.data() && a.row_pitch() == b.row_pitch();
+}
+
+inline bool can_pack_u8x4(const ImageSpec& image) {
+  return image.depth == Depth::k8U && image.channels == 4 &&
+         image.address % 4 == 0 && image.row_stride % 4 == 0;
+}
+
+/* Only pixels count as overlap. An ROI may occupy another view's row gaps. */
 inline bool images_overlap(const GpuMat& a, const GpuMat& b) {
-  auto range = [](const GpuMat& image) {
-    using U = std::uintptr_t;
-    const U begin = reinterpret_cast<U>(image.data());
-    const U row_bytes = static_cast<U>(image.width()) *
-                        static_cast<U>(image.channels()) *
-                        depth_size(image.depth());
-    const U last_row = static_cast<U>(image.height() - 1) *
-                       static_cast<U>(image.row_pitch());
-    return std::make_pair(begin, begin + last_row + row_bytes);
+  using Address = std::uintptr_t;
+  auto row_bytes = [](const GpuMat& image) {
+    return static_cast<Address>(image.width()) * image.channels() *
+           depth_size(image.depth());
   };
-  const auto ra = range(a);
-  const auto rb = range(b);
-  return ra.first < rb.second && rb.first < ra.second;
+  Address a_row = reinterpret_cast<Address>(a.data());
+  Address b_row = reinterpret_cast<Address>(b.data());
+  const Address a_width = row_bytes(a), b_width = row_bytes(b);
+  const auto a_pitch = static_cast<Address>(a.row_pitch());
+  const auto b_pitch = static_cast<Address>(b.row_pitch());
+  const Address a_end = a_row + (a.height() - 1) * a_pitch + a_width;
+  const Address b_end = b_row + (b.height() - 1) * b_pitch + b_width;
+  if (a_end <= b_row || b_end <= a_row) return false;
+  if (a_pitch == b_pitch) {
+    if (a_row > b_row) {
+      const auto offset = (a_row - b_row) % a_pitch;
+      return offset < b_width || a_pitch - offset < a_width;
+    }
+    const auto offset = (b_row - a_row) % a_pitch;
+    return offset < a_width || a_pitch - offset < b_width;
+  }
+  while (a_row < a_end && b_row < b_end) {
+    if (a_row + a_width <= b_row) {
+      const auto advance = (b_row - (a_row + a_width)) / a_pitch + 1;
+      if (advance > (a_end - 1 - a_row) / a_pitch) return false;
+      a_row += advance * a_pitch;
+    } else if (b_row + b_width <= a_row) {
+      const auto advance = (a_row - (b_row + b_width)) / b_pitch + 1;
+      if (advance > (b_end - 1 - b_row) / b_pitch) return false;
+      b_row += advance * b_pitch;
+    } else {
+      return true;
+    }
+  }
+  return false;
 }
 
 inline void require_same_layout(const ImageSpec& a, const ImageSpec& b) {

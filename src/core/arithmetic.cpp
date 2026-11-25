@@ -2,29 +2,43 @@
 
 #include <flagcv/core.hpp>
 
-#include "src/lowering/lowering.hpp"
 #include "src/runtime/runtime.hpp"
 
 namespace flagcv {
 
 void add(Handle& handle, const GpuMat& src1, const GpuMat& src2,
          const GpuMat& dst, Stream stream) {
-  const LoweredOp op = lower_pointwise(src1, src2, dst, PointwiseMode::kAdd);
-  launch(handle, op, {src1.data(), src2.data(), dst.data()}, stream);
+  launch_pointwise(handle, src1, src2, dst, nullptr, PointwiseMode::kAdd,
+                   stream);
+}
+
+void add(Handle& handle, const GpuMat& src1, const GpuMat& src2,
+         const GpuMat& dst, const GpuMat& mask, Stream stream) {
+  launch_pointwise(handle, src1, src2, dst, &mask, PointwiseMode::kAdd,
+                   stream);
 }
 
 void subtract(Handle& handle, const GpuMat& src1, const GpuMat& src2,
               const GpuMat& dst, Stream stream) {
-  const LoweredOp op =
-      lower_pointwise(src1, src2, dst, PointwiseMode::kSubtract);
-  launch(handle, op, {src1.data(), src2.data(), dst.data()}, stream);
+  launch_pointwise(handle, src1, src2, dst, nullptr, PointwiseMode::kSubtract,
+                   stream);
+}
+
+void subtract(Handle& handle, const GpuMat& src1, const GpuMat& src2,
+              const GpuMat& dst, const GpuMat& mask, Stream stream) {
+  launch_pointwise(handle, src1, src2, dst, &mask, PointwiseMode::kSubtract,
+                   stream);
 }
 
 void multiply(Handle& handle, const GpuMat& src1, const GpuMat& src2,
               const GpuMat& dst, Stream stream) {
-  const LoweredOp op =
-      lower_pointwise(src1, src2, dst, PointwiseMode::kMultiply);
-  launch(handle, op, {src1.data(), src2.data(), dst.data()}, stream);
+  multiply(handle, src1, src2, dst, 1.0, stream);
+}
+
+void multiply(Handle& handle, const GpuMat& src1, const GpuMat& src2,
+              const GpuMat& dst, double scale, Stream stream) {
+  launch_pointwise(handle, src1, src2, dst, nullptr, PointwiseMode::kMultiply,
+                   stream, scale);
 }
 
 }  // namespace flagcv

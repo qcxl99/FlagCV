@@ -8,7 +8,7 @@
 
 #include "src/lowering/lowering.hpp"
 
-#include <vector>
+#include <string>
 
 namespace flagcv {
 
@@ -21,10 +21,12 @@ namespace flagcv {
  * Lowering happens in the entry point, not here, so invalid operands are
  * rejected on every call rather than only on a cache miss.
  */
-void launch(Handle& handle,
-            const LoweredOp& op,
-            const std::vector<void*>& pointers,
-            Stream stream);
+void launch(Handle& handle, LoweredOp op, Stream stream);
+
+/* Preserve the operand ordering used by arithmetic and bitwise lowering. */
+void launch_pointwise(Handle& handle, const GpuMat& src1, const GpuMat& src2,
+                      const GpuMat& dst, const GpuMat* mask,
+                      PointwiseMode mode, Stream stream, double scale = 1.0);
 
 /*
  * Resolves an operation to a kernel source and entry function.

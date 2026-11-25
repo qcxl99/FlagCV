@@ -20,8 +20,11 @@ def flip_kernel(
     CHANNELS: tl.constexpr,
     FLIP_X: tl.constexpr,
     FLIP_Y: tl.constexpr,
+    IN_PLACE: tl.constexpr,
+    VEC4: tl.constexpr,
     BLOCK_X: tl.constexpr,
     BLOCK_Y: tl.constexpr,
+    ROW_GRID_LIMIT: tl.constexpr,
 ):
     """dst(y, x, c) = src(y', x', c), y' and x' mirrored when FLIP_Y / FLIP_X.
 
@@ -31,16 +34,26 @@ def flip_kernel(
     elements (see docs/architecture.md), and row offsets are widened to int64
     so large padded images cannot overflow.
     """
+    if VEC4:
+        src_ptr = src_ptr.to(tl.pointer_type(tl.uint32))
+        dst_ptr = dst_ptr.to(tl.pointer_type(tl.uint32))
+        src_row_stride = src_row_stride // 4
+        dst_row_stride = dst_row_stride // 4
+    VALUES_PER_PIXEL: tl.constexpr = 1 if VEC4 else CHANNELS
     pid_x = tl.program_id(0)
-    pid_y = tl.program_id(1)
+    pid_y = tl.program_id(1).to(tl.int64)
+    if ROW_GRID_LIMIT:
+        pid_y += tl.program_id(2).to(tl.int64) * ROW_GRID_LIMIT
 
     elem = pid_x * BLOCK_X + tl.arange(0, BLOCK_X)
     row = pid_y * BLOCK_Y + tl.arange(0, BLOCK_Y)
-    in_bounds = (row[:, None] < height) & (elem[None, :] < width * CHANNELS)
+    in_bounds = (row[:, None] < height) & (elem[None, :] < width * VALUES_PER_PIXEL)
 
     if FLIP_X:
-        pixel = elem // CHANNELS
-        src_elem = (width - 1 - pixel) * CHANNELS + (elem - pixel * CHANNELS)
+        pixel = elem // VALUES_PER_PIXEL
+        src_elem = (width - 1 - pixel) * VALUES_PER_PIXEL + (
+            elem - pixel * VALUES_PER_PIXEL
+        )
     else:
         src_elem = elem
     if FLIP_Y:
@@ -48,9 +61,15 @@ def flip_kernel(
     else:
         src_row = row
 
-    src_offsets = src_row.to(tl.int64)[:, None] * src_row_stride + src_elem[None, :]
-    dst_offsets = row.to(tl.int64)[:, None] * dst_row_stride + elem[None, :]
+    src_offsets = src_row[:, None] * src_row_stride + src_elem[None, :]
+    dst_offsets = row[:, None] * dst_row_stride + elem[None, :]
+    if IN_PLACE:
+        # Exactly one lane owns each mirrored pair. Fixed points need no write.
+        in_bounds = in_bounds & (dst_offsets < src_offsets)
     values = tl.load(src_ptr + src_offsets, mask=in_bounds)
+    if IN_PLACE:
+        opposite = tl.load(src_ptr + dst_offsets, mask=in_bounds)
+        tl.store(dst_ptr + src_offsets, opposite, mask=in_bounds)
     tl.store(dst_ptr + dst_offsets, values, mask=in_bounds)
 
 

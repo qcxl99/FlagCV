@@ -75,7 +75,6 @@ def _validate_outputs(op_name, candidate, args, baseline, baseline_args):
     from helpers.tolerance import (
         assert_bitwise_equal,
         assert_exact,
-        assert_one_lsb,
         assert_relative_close,
     )
     from reference import get_reference
@@ -89,7 +88,7 @@ def _validate_outputs(op_name, candidate, args, baseline, baseline_args):
     if op_name == "flip":
         compare = assert_bitwise_equal
     elif dst.dtype == torch.uint8:
-        compare = assert_one_lsb if op_name in ("add", "subtract") else assert_exact
+        compare = assert_exact
     else:
         compare = assert_relative_close
 
