@@ -309,7 +309,8 @@ def _cubic_constant_group(xs, dst_w, row_x, row_y, M00, M10, bigw, bigh, src_w, 
     chunk_tail = dst_w % 128
     padded_tail = (chunk_tail > 0) & (chunk_tail < 4)
     aligned_start = xs // 4 * 4
-    group_start = tl.where(padded_tail, aligned_start, tl.minimum(aligned_start, dst_w - 4))
+    in_final_group = ~padded_tail & (xs >= dst_w - 4)
+    group_start = tl.where(in_final_group, dst_w - 4, aligned_start)
     group_outside = group_start + 3 < dst_w
     for peer in tl.static_range(4):
         peer_x = (group_start + peer).to(tl.float32)
