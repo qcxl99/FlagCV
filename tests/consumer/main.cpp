@@ -3,8 +3,14 @@
 
 #include <flagcv/flagcv.hpp>
 
-#ifdef FLAGCV_CONSUMER_NVIDIA
+#if defined(FLAGCV_CONSUMER_HIP) || defined(FLAGCV_CONSUMER_NVIDIA)
+#ifdef FLAGCV_CONSUMER_HIP
+#include "hip_test_api.hpp"
+constexpr auto backend = "hip";
+#else
 #include <cuda_runtime_api.h>
+constexpr auto backend = "nvidia";
+#endif
 
 #include <array>
 #include <iostream>
@@ -19,7 +25,8 @@ void check(cudaError_t status) {
 auto allocate(std::size_t bytes) {
   void* data = nullptr;
   check(cudaMalloc(&data, bytes));
-  return std::unique_ptr<void, decltype(&cudaFree)>(data, cudaFree);
+  auto release = [](void* ptr) { (void)cudaFree(ptr); };
+  return std::unique_ptr<void, decltype(release)>(data, release);
 }
 }  // namespace
 
@@ -28,7 +35,7 @@ int main() {
     std::array<unsigned char, 8> values{1, 2, 3, 4, 5, 6, 7, 8};
     const auto src = allocate(values.size()), dst = allocate(values.size());
     check(cudaMemcpy(src.get(), values.data(), values.size(), cudaMemcpyHostToDevice));
-    flagcv::Handle handle;
+    flagcv::Handle handle(backend);
     const flagcv::GpuMat src_view(src.get(), 4, 2, flagcv::Depth::k8U, 1);
     const flagcv::GpuMat dst_view(dst.get(), 4, 2, flagcv::Depth::k8U, 1);
     for (int i = 0; i < 3; ++i) flagcv::flip(handle, src_view, dst_view, 1);

@@ -30,8 +30,9 @@ Plus the toolchain of the backend you build. `libflagcv` itself links no vendor 
 | `mthreads` | MUSA runtime |
 | `thead` | PPU driver API (`CUstream`), T-Head PPU SDK |
 
-NVIDIA is the validated C++ backend. Iluvatar, Hygon, MThreads and T-Head
-can be built with their SDKs and await native launch qualification.
+NVIDIA and the shared HIP path have on-device public API evidence. HIP
+qualification is tracked per device and toolchain. Iluvatar, MThreads and
+T-Head can be built with their SDKs and await native launch qualification.
 For Iluvatar, use `-DCUDAToolkit_ROOT=<corex>`.
 
 C++ interface conventions and the call path are documented in

@@ -188,8 +188,9 @@ build for a device it never touches. The platform facts the compiler needs —
 artifact format, Triton backend name, element-block and warp limits — are in
 `compiler/flagcv_codegen/platform.py`.
 
-NVIDIA is validated for this release. The other plugin sources and AMD PR #3
-are tracked in the operator inventory for follow-up platform qualification.
+The [operator inventory](operators.md) and [HIP validation](hip-validation.md)
+track which device/toolchain combinations have native evidence. Plugin
+buildability and offline ABI checks are recorded separately.
 
 The runtime and provider split follows the FlagDNN approach. Python operator
 evaluation retains the case, candidate and JSON interfaces used by FlagGems.

@@ -5,6 +5,12 @@
 lowering 和算子接口保持同一契约。插件对每次加载和提交使用 Handle
 绑定的 HIP 设备，结束后恢复调用线程的设备，应用继续管理显存和流。
 
+| 平台 | 当前证据 |
+| --- | --- |
+| W7900D gfx1100 / ROCm | 公共 C++ API、Python 正确性及同卡性能。 |
+| BW1000 gfx936 / DTK | 公共 C++ API 和 Python 正确性。 |
+| BW1101 gfx938 / DTK | 预览。构建和离线编译通过，待设备空闲后补实际 launch、正确性与生命周期。 |
+
 ## 复跑
 
 选空闲卡并按物理设备取得锁，记录 PCI、GPU 身份、SDK、FlagTree 和
@@ -24,7 +30,9 @@ ctest --test-dir build-hip -L hip --output-on-failure
 python -m pytest -q tests/test_*.py --builtin --device cuda:0
 ```
 
-安装后迁移安装前缀，从树外运行公开 API 测试，并核对实际加载的
+安装后迁移安装前缀。用 `tests/consumer` 编译树外示例（开启
+`-DFLAGCV_CONSUMER_HIP=ON`，将 `CMAKE_PREFIX_PATH` 指向迁移后前缀）。
+运行树外示例与公开 API 矩阵，核对实际加载的
 Runtime、HIP 插件和编译数据来自该前缀。合入证据包含 C++ 六个算子的
 OpenCV CPU 参考、数值例外、缓存、流与资源验证、拒绝用例以及
 workload 和原始结果。HIP 编译阶段检查输出的 ABI，规则见
