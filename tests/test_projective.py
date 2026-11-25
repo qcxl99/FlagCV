@@ -101,7 +101,8 @@ def native_candidate(module, src, dst, interpolation, border, flag, coefficients
     warps = planned_warps if warps is None else warps
     common = (*src.shape[:2], height, width, src.stride(0), dst.stride(0), *values)
     constexprs = dict(CN=src.shape[2], INTER=1 if interpolation == 3 else interpolation,
-                      BORDER=border, BLOCK=block, num_warps=warps, enable_fp_fusion=False)
+                      BORDER=border, BLOCK=block, num_warps=warps, num_stages=1,
+                      enable_fp_fusion=False)
     columns = triton.cdiv(width, block)
     constexprs["COL_GRID_LIMIT"] = limit
     grid = ((height, min(columns, limit), triton.cdiv(columns, limit))
