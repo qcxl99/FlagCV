@@ -121,6 +121,77 @@ def gaussian_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_
 
 
 @triton.jit
+def _local_gaussian_axis(position, size, BORDER: tl.constexpr):
+    # Tiled lowering restricts extents to more than the halo radius.
+    if BORDER == 0:
+        return tl.minimum(tl.maximum(position, 0), size - 1), (position >= 0) & (position < size)
+    if BORDER == 1:
+        return tl.minimum(tl.maximum(position, 0), size - 1), tl.full(position.shape, True, tl.int1)
+    if BORDER == 2:
+        folded = tl.where(position < 0, -1 - position, position)
+        return tl.where(folded >= size, 2 * size - 1 - folded, folded), tl.full(position.shape, True, tl.int1)
+    folded = tl.abs(position)
+    return tl.where(folded >= size, 2 * (size - 1) - folded, folded), tl.full(position.shape, True, tl.int1)
+
+
+@triton.jit
+def _gaussian_local_rows(src, dst, coeff, width, height, src_stride, dst_stride,
+                         CHANNELS: tl.constexpr, BORDER: tl.constexpr, TAPS: tl.constexpr,
+                         BLOCK: tl.constexpr, TILE_Y: tl.constexpr):
+    # With 16 output rows and 7 or 15 taps, 32 slots hold the tile and its halo.
+    ROWS: tl.constexpr = 32
+    radius: tl.constexpr = TAPS // 2
+    start = tl.program_id(0) * BLOCK
+    elements = start + tl.arange(0, BLOCK)
+    row_elements = width * CHANNELS
+    start_y = tl.program_id(1) * TILE_Y
+    stored = tl.arange(0, ROWS)
+    y = start_y + stored - radius
+    real_y = (y < height + radius) & (stored < TILE_Y + TAPS - 1)
+    mapped_y, valid_y = _local_gaussian_axis(tl.minimum(y, height + radius - 1), height, BORDER)
+    src_row = mapped_y[:, None] * src_stride
+    valid_y = valid_y & real_y
+    horizontal = tl.full((ROWS, BLOCK), 0, tl.float32)
+    if start >= radius * CHANNELS and start + BLOCK + radius * CHANNELS <= row_elements:
+        # Unit-stride center loads preserve coalescing for interleaved C3.
+        for tap in tl.static_range(TAPS):
+            value = tl.load(src + src_row + elements[None, :] + (tap - radius) * CHANNELS,
+                            valid_y[:, None], 0)
+            horizontal += value * tl.load(coeff + tap).to(tl.float32)
+    else:
+        x = tl.minimum(elements // CHANNELS, width - 1)
+        channel = elements % CHANNELS
+        for tap in tl.static_range(TAPS):
+            mapped_x, valid_x = _local_gaussian_axis(x + tap - radius, width, BORDER)
+            value = tl.load(src + src_row + (mapped_x * CHANNELS + channel)[None, :],
+                            valid_y[:, None] & (valid_x & (elements < row_elements))[None, :], 0)
+            horizontal += value * tl.load(coeff + tap).to(tl.float32)
+
+    local = tl.arange(0, TILE_Y)
+    output = tl.full((TILE_Y, BLOCK), 0, tl.float32)
+    # Keep the same sequential FP32 sum of taps used by the vertical pass.
+    for tap in tl.static_range(TAPS):
+        slot = tl.broadcast_to((local + tap)[:, None], (TILE_Y, BLOCK))
+        output += tl.gather(horizontal, slot, axis=0) * tl.load(coeff + TAPS + tap).to(tl.float32)
+    out_y = start_y + local
+    address = tl.minimum(out_y, height - 1)[:, None] * dst_stride + tl.minimum(elements, row_elements - 1)[None, :]
+    tl.store(dst + address, output, (out_y < height)[:, None] & (elements < row_elements)[None, :])
+
+
+@triton.jit
+def gaussian_f32_local(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                       kernel_width, kernel_height, CHANNELS: tl.constexpr, BORDER: tl.constexpr,
+                       FP64: tl.constexpr, FIXED_BITS: tl.constexpr, TAPS: tl.constexpr,
+                       BLOCK: tl.constexpr, TILE_Y: tl.constexpr):
+    if TILE_Y:
+        _gaussian_local_rows(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                             CHANNELS, BORDER, TAPS, BLOCK, TILE_Y)
+    else:
+        gaussian_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                        kernel_width, kernel_height, CHANNELS, BORDER, FP64, FIXED_BITS, BLOCK)
+
+
+@triton.jit
 def gaussian_horizontal(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
                         kernel_width, CHANNELS: tl.constexpr, BORDER: tl.constexpr,
                         FP64: tl.constexpr, FIXED_BITS: tl.constexpr, BLOCK: tl.constexpr):

@@ -176,6 +176,16 @@ def plan_spatial_filter(request, facts):
     return {"BLOCK": block}, min(4, facts["max_warps"]), grid
 
 
+def plan_gaussian_f32_local(request, facts):
+    if request["backend"] == "hip" and request["target"] == "hip:gfx1100:32":
+        tuning = {"BLOCK": 64, "TILE_Y": 16}
+        grid = [{"product": ["width", "CHANNELS"], "block": tuning["BLOCK"]},
+                {"product": ["height"], "block": tuning["TILE_Y"]}, 1]
+        return tuning, 4, grid
+    tuning, warps, grid = plan_spatial_filter(request, facts)
+    return {**tuning, "TILE_Y": 0}, warps, grid
+
+
 PLANS = dict.fromkeys(
     (
         "add", "subtract", "multiply", "bitwise_and", "bitwise_not",
@@ -193,6 +203,7 @@ PLANS["threshold_clear"] = plan_threshold_clear
 PLANS["threshold_select"] = plan_threshold_select
 for route in ("direct", "horizontal", "vertical"):
     PLANS[f"gaussian_{route}"] = plan_spatial_filter
+PLANS["gaussian_f32_local"] = plan_gaussian_f32_local
 PLANS["filter2d_direct"] = plan_spatial_filter
 PLANS["warp_perspective"] = plan_projective
 PLANS["remap"] = plan_projective
