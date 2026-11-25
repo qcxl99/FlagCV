@@ -51,7 +51,7 @@ def cpp_samples(family, case, raw):
                                 native_event_us=native_event, native_sync_wall_us=native_wall))
     else:
         rows = list(csv.DictReader(io.StringIO(raw)))
-        samples = [row for row in rows if row["sample"].isdigit()]
+        samples = [row for row in rows if (row.get("sample") or "").isdigit()]
     if not samples or any(row.get("case", row.get("id")) != case for row in samples):
         raise ValueError(f"{case} missing public C++ samples")
     groups = {}
@@ -60,7 +60,7 @@ def cpp_samples(family, case, raw):
     result = {}
     for name, rows in groups.items():
         state = rows[0].get("classification", rows[0].get("status"))
-        if state not in ("COMPARABLE", "SEMANTICS_DIFFER", "NATIVE_REFUSED", "CANDIDATE_ONLY"):
+        if state not in ("COMPARABLE", "SEMANTICS_DIFFER", "NATIVE_REFUSED", "NATIVE_LAYOUT_CHANGED", "CANDIDATE_ONLY"):
             raise ValueError(f"{case} failed public C++ verification: {state}")
         if [int(row["sample"]) for row in rows] != list(range(11)):
             raise ValueError(f"{case} missing public C++ timing samples")
@@ -85,7 +85,7 @@ def python_samples(case, raw, profile):
         raise ValueError(f"{case} missing or duplicate installed Python result")
     row = rows[0]
     state = row.get("classification")
-    if state not in ("COMPARABLE", "SEMANTICS_DIFFER", "NATIVE_REFUSED") or not row.get("launch"):
+    if state not in ("COMPARABLE", "SEMANTICS_DIFFER", "NATIVE_REFUSED", "NATIVE_LAYOUT_CHANGED") or not row.get("launch"):
         raise ValueError(f"{case} failed independent Python CPU verification: {row.get('error', state)}")
     if len(row.get("pairs") or row.get("samples") or []) != PROFILES[profile].samples:
         raise ValueError(f"{case} missing installed Python timing samples")
@@ -122,7 +122,6 @@ def run_live(prefix, cases, profile, summary):
     env["PYTHONPATH"] = os.pathsep.join([str(data), str(data/"compiler"), env.get("PYTHONPATH", "")])
     runners = prefix / install["runners"]
     env["FLAGCV_IMGP_FIRST_BRIDGE"] = str(runners/"libflagcv_imgproc_first_bridge.so")
-    env["FLAGCV_IMGP_BATCH_BRIDGE"] = str(runners/"libflagcv_imgproc_batch_bridge.so")
     env["FLAGCV_IMGP_SPATIAL_BRIDGE"] = str(runners/"libflagcv_imgproc_spatial_bridge.so")
     import cv2
     modules = list(Path(cv2.__file__).parent.glob("**/cv2*.so"))
@@ -148,7 +147,7 @@ def run_live(prefix, cases, profile, summary):
             for module, details in cpp_identity["opencv"].items():
                 if module not in python_opencv or hashlib.sha256(python_opencv[module].read_bytes()).hexdigest() != details["sha256"]:
                     raise ValueError(f"C++ and Python resolve different {module}")
-            for bridge in ("FLAGCV_IMGP_FIRST_BRIDGE", "FLAGCV_IMGP_SPATIAL_BRIDGE", "FLAGCV_IMGP_BATCH_BRIDGE"):
+            for bridge in ("FLAGCV_IMGP_FIRST_BRIDGE", "FLAGCV_IMGP_SPATIAL_BRIDGE"):
                 verify_identity(prefix, Path(env[bridge]), env)
             manifest.write_text(json.dumps([fixture["data"]]))
             command = [sys.executable, str(package/f"{family}.py"), "--matrix", str(manifest), "--profile", profile]

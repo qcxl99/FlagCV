@@ -18,7 +18,7 @@ foreach(name IN ITEMS first geometry arithmetic_filters batch)
   install(TARGETS flagcv_imgproc_${name} RUNTIME DESTINATION "${runners}")
 endforeach()
 
-foreach(name IN ITEMS first spatial batch)
+foreach(name IN ITEMS first spatial)
   add_library(flagcv_imgproc_${name}_bridge SHARED ${name}_bridge.cpp)
   target_compile_features(flagcv_imgproc_${name}_bridge PRIVATE cxx_std_17)
   target_include_directories(flagcv_imgproc_${name}_bridge PRIVATE "${PROJECT_SOURCE_DIR}")

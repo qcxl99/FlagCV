@@ -63,8 +63,10 @@ extern "C" std::size_t host_bytes(void* state) { return static_cast<State*>(stat
 extern "C" void release(void* state) { delete static_cast<State*>(state); }
 extern "C" const char* last_message() { return message.c_str(); }
 
-extern "C" const char* describe(void* raw, void* source, long long src_pitch, void* destination,
-                                int dw,int dh,int dcn,long long dst_pitch,const void* table) {
+static const char* describe_plan(void* raw, void* source, long long src_pitch,
+                                 void* destination, int dw, int dh, int dcn,
+                                 long long dst_pitch, const void* table,
+                                 int count, long long source_batch, long long destination_batch, bool batch) {
   using namespace flagcv;
   try {
     const State& st=*static_cast<State*>(raw);
@@ -74,7 +76,7 @@ extern "C" const char* describe(void* raw, void* source, long long src_pitch, vo
     const DeviceWorkspace ws{table,st.host.bytes};
     LoweredOp op;
     if (st.operation==0)
-      op=lower_resize(src,dst,*st.resize,ws,1,0,0,false);
+      op=lower_resize(src,dst,*st.resize,ws,count,source_batch,destination_batch,batch);
     else if (st.operation==1)
       op=lower_warp_affine(src,dst,st.matrix,mode,st.border==5 ? Border::kTransparent :
                             Border::kReplicate,{},false);
@@ -112,4 +114,19 @@ extern "C" const char* describe(void* raw, void* source, long long src_pitch, vo
     message=e.what();
     return nullptr;
   }
+}
+
+extern "C" const char* describe(void* raw, void* source, long long src_pitch,
+                                void* destination, int dw, int dh, int dcn,
+                                long long dst_pitch, const void* table) {
+  return describe_plan(raw, source, src_pitch, destination, dw, dh, dcn, dst_pitch, table,
+                       1, 0, 0, false);
+}
+
+extern "C" const char* describe_batch(void* raw, void* source, long long src_pitch,
+                                      void* destination, int dw, int dh, int dcn,
+                                      long long dst_pitch, const void* table, int count,
+                                      long long source_batch, long long destination_batch) {
+  return describe_plan(raw, source, src_pitch, destination, dw, dh, dcn, dst_pitch, table,
+                       count, source_batch, destination_batch, true);
 }

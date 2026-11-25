@@ -16,7 +16,7 @@ from flagcv_codegen.triton_build import load_jit_function
 from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES
 
 run=Path(__file__).resolve().parent
-lib=c.CDLL(os.environ["FLAGCV_IMGP_BATCH_BRIDGE"])
+lib=c.CDLL(os.environ["FLAGCV_IMGP_FIRST_BRIDGE"])
 P,I,L=c.c_void_p,c.c_int,c.c_longlong
 lib.prepare.argtypes=[I]*11+[c.c_double,c.c_double]
 lib.prepare.restype=P
@@ -24,8 +24,8 @@ lib.host_bytes.argtypes=[P]
 lib.host_bytes.restype=c.c_size_t
 lib.host_data.argtypes=[P]
 lib.host_data.restype=P
-lib.describe.argtypes=[P,P,L,P,I,I,I,L,P,I,L,L]
-lib.describe.restype=c.c_char_p
+lib.describe_batch.argtypes=[P,P,L,P,I,I,I,L,P,I,L,L]
+lib.describe_batch.restype=c.c_char_p
 lib.release.argtypes=[P]
 lib.last_message.restype=c.c_char_p
 kernel=lru_cache(maxsize=None)(load_jit_function)
@@ -71,7 +71,7 @@ def run_case(row):
             data=np.frombuffer(c.string_at(lib.host_data(state),size),dtype=np.uint8).copy()
             table=torch.from_numpy(data).to("cuda")
         addr=table.data_ptr() if table is not None else 0
-        raw=lib.describe(state,source.data_ptr(),source.stride(1),dest.data_ptr(),
+        raw=lib.describe_batch(state,source.data_ptr(),source.stride(1),dest.data_ptr(),
                          width,height,cn,dest.stride(1),addr,n,source.stride(0),dest.stride(0))
         if not raw:
             raise RuntimeError(lib.last_message().decode())
