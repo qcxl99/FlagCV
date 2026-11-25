@@ -60,6 +60,14 @@ plugin reports the compile target (`cuda:90:32`), so the compiler imports no
 framework and needs no GPU. The protocol is one JSON object per line; it is
 documented in `compiler/flagcv_codegen/main.py`.
 
+Each compiler exchange uses a monotonic deadline for writing and reading.
+`FLAGCV_COMPILER_TIMEOUT_MS` defaults to 120000 ms. A timeout discards the
+protocol connection, terminates the compiler's process group and attempts
+bounded reaping. A later request can start a fresh compiler after reaping.
+Closing a Handle releases its loaded modules. At process shutdown the shared
+compiler gets a short EOF grace period before termination.
+
+
 **Loaded modules.** Each Handle owns a cache in the context of its bound
 device. It matches the kernel name and operand/parameter signature, including
 depth, channels, 16-byte base alignment, constexpr values and runtime argument
@@ -80,6 +88,26 @@ compiler process (default `python3`). Kernels, the compiler and platform
 providers are found under `FLAGCV_DATA_DIR`, else the installed data directory
 relative to libflagcv, else the source tree it was built from. Plugins are found under
 `FLAGCV_PLUGIN_DIR`, else `flagcv/` next to libflagcv, else the build tree.
+
+## Scratch ABI qualification
+
+The public C++ launch path currently qualifies NVIDIA with upstream Triton
+3.6.0. The compiler checks that both scratch allocation sizes are present and
+zero. It also verifies the emitted PTX entry layout against the Runtime
+signature, including the two trailing 64-bit pointer parameters. The Runtime
+compares that count with the backend expectation before loading the binary.
+
+Iluvatar, Hygon, MThreads, T-Head and Ascend need their exact compiler build,
+emitted argument layout, scratch metadata semantics and an on-device public API
+test before enabling native launch. Their plugin sources remain buildable.
+The standalone Python evaluation continues to use each compiler's own launcher.
+NVIDIA validation used CUDA sm90 on H20. Other versions and vendor variants
+need a qualification of their own.
+
+The process-group cleanup follows the approach in
+[FlagDNN's compiler client](https://github.com/flagos-ai/FlagDNN/blob/a84bcc18a172fa01597d2fc171ce3af680f3074a/src/runtime/compiler_client.cpp#L671).
+The CUDA parameter order is from the
+[Triton 3.6.0 NVIDIA launcher](https://github.com/triton-lang/triton/blob/v3.6.0/third_party/nvidia/backend/driver.py).
 
 ## Units: pitch vs stride
 

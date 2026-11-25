@@ -214,7 +214,7 @@ template <typename Api>
 const FlagcvBackendV2* table() {
   static const FlagcvBackendV2 value = {
       FLAGCV_BACKEND_VERSION,
-      1,  // appends_scratch_args: Triton's ABI ends with two scratch pointers
+      1,  // appends_scratch_args: expected by this plugin, checked before load
       create_context<Api>,
       destroy_context<Api>,
       device_id<Api>,

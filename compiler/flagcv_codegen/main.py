@@ -23,7 +23,7 @@ failure carries ``error`` instead of a result. Requests:
    "params": [{"name": "width", "type": "i32"},
               {"name": "CHANNELS", "type": "constexpr", "value": 3}, ...]}
       -> {"id": 2, "ok": true, "artifact": "/abs/.../flip_kernel.cubin",
-          "function": "flip_kernel", "num_warps": 4, "shared": 0,
+          "function": "flip_kernel", "num_warps": 4, "shared": 0, "scratch_args": 2,
           "grid": [{"product": ["width", "CHANNELS"], "block": 512},
                    {"product": ["height"], "block": 4}, 1]}
 

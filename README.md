@@ -35,6 +35,10 @@ NVIDIA is the validated delivery backend. Iluvatar, Hygon, MThreads, T-Head and 
 C++ interface conventions and the call path are documented in
 [C++ operator interfaces](docs/cpp-operators.md).
 
+The public C++ launcher currently qualifies NVIDIA with Triton 3.6.0.
+See [scratch ABI qualification](docs/architecture.md#scratch-abi-qualification)
+for the supported native launch scope.
+
 ## Build and test
 
 ```sh
@@ -131,7 +135,8 @@ FlagGems-compatible reporting are documented in [Python evaluation](docs/python-
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `FLAGCV_PYTHON` | `python3` | Interpreter for the compiler process; it must have Triton installed |
+| `FLAGCV_PYTHON` | `python3` | Interpreter for the external compiler |
+| `FLAGCV_COMPILER_TIMEOUT_MS` | `120000` | Deadline for a compiler request, in milliseconds |
 | `FLAGCV_CACHE_DIR` | `~/.cache/flagcv` | Where compiled kernel binaries are written |
 | `FLAGCV_DATA_DIR` | `<prefix>/share/flagcv`, else the source tree | Kernel sources, compiler and platform providers |
 | `FLAGCV_PLUGIN_DIR` | `<prefix>/lib/flagcv`, else the build tree | Backend plugins (`libflagcv_<backend>.so`) |

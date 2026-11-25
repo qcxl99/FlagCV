@@ -112,6 +112,7 @@ struct LoadedKernel {
   unsigned int block_threads = 0;
   unsigned int shared_bytes = 0;
   GridDim grid[3];
+  bool appends_scratch_args = false;
 };
 
 /* Compiler identity per backend, asked once per process. */
@@ -311,11 +312,17 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
     body << "]";
 
     json::Value reply = CompilerClient::instance().request(body.str());
+    const int expected_scratch_args = plugin.appends_scratch_args ? 2 : 0;
+    if (!reply.has("scratch_args") || !reply.at("scratch_args").is_number() ||
+        reply.at("scratch_args").as_number() != expected_scratch_args)
+      throw Error("flagcv: compiler scratch ABI does not match backend '" +
+                  state.backend + "'");
     const std::string binary = read_file(reply.at("artifact").as_string());
 
     LoadedKernel loaded;
     loaded.name = kernel_name;
     loaded.signature.assign(signature.begin(), signature.end());
+    loaded.appends_scratch_args = expected_scratch_args != 0;
     const std::int64_t warp_size =
         std::stoll(state.target.substr(state.target.rfind(':') + 1));
     loaded.block_threads =
@@ -408,9 +415,8 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
     }
   }
   std::uint64_t global_scratch = 0, profile_scratch = 0;
-  if (plugin.appends_scratch_args) {
-    // Triton's ABI ends with two scratch pointers. The compiler rejects any
-    // kernel that needs real scratch memory, so null is correct here.
+  if (kernel.appends_scratch_args) {
+    // The compiler verified both pointer slots and zero allocation sizes.
     args.push_back(&global_scratch);
     args.push_back(&profile_scratch);
     kinds.push_back(0);

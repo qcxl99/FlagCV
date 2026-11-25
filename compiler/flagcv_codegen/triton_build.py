@@ -22,6 +22,7 @@ from triton.backends.compiler import GPUTarget
 from triton.runtime.cache import triton_key
 
 from flagcv_codegen import platform as platforms
+from flagcv_codegen.scratch_abi import require_qualified_compiler, validated_scratch_args
 
 # Kernel pointer element types, keyed by the depth names the runtime sends.
 DEPTH_TO_TRITON = {
@@ -165,6 +166,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         raise ValueError(
             f"{request['backend']} cannot compile target {request['target']!r}"
         )
+    require_qualified_compiler(request["backend"], target.backend, triton.__version__)
     backend = triton.compiler.make_backend(target)
     options = backend.parse_options({"num_warps": num_warps, "num_stages": num_stages})
     # Deliberately no fn.create_binder(): it probes the active driver, which
@@ -176,14 +178,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     compiled = triton.compile(source, target=target, options=options.__dict__)
 
     metadata = compiled.metadata
-    # The runtime passes null scratch pointers; a kernel that needs real
-    # scratch memory would silently corrupt memory, so refuse it here.
-    for field in ("global_scratch_size", "profile_scratch_size"):
-        if getattr(metadata, field, 0):
-            raise RuntimeError(
-                f"{request['function']} needs {field}={getattr(metadata, field)}, "
-                "which is not supported"
-            )
+    scratch_args = validated_scratch_args(metadata, compiled.asm.get("ptx"), signature)
 
     # The image Triton emits is platform specific: cubin on CUDA-shaped
     # vendors, hsaco/mubin/hgbin on the others, npubin on Ascend.
@@ -204,6 +199,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         os.replace(tmp.name, artifact)
     return {
         "artifact": str(artifact),
+        "scratch_args": scratch_args,
         "function": metadata.name,
         "num_warps": metadata.num_warps,
         "shared": metadata.shared,

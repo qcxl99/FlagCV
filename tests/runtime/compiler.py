@@ -15,5 +15,5 @@ def compile(request):
         stream.write(f"{request['kernel']} {selection} {function}\n")
     artifact = trace.with_suffix(".bin")
     artifact.write_bytes(b"fixture")
-    return {"artifact": str(artifact), "function": function, "num_warps": 1, "shared": 0,
+    return {"artifact": str(artifact), "function": function, "num_warps": 1, "shared": 0, "scratch_args": 0,
             "grid": [{"product": ["width"], "block": 16}, 1, 1]}
