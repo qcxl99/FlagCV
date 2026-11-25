@@ -157,6 +157,49 @@ void correlation_case(Handle& handle, const Stream& upload, const Stream& use,
           });
 }
 
+template<class Pixel>
+void half_weight_case(Handle& handle, const Stream& upload, const Stream& use,
+                      int depth, int extent) {
+  constexpr Size image{37, 19};
+  const int center = extent / 2;
+  std::vector<double> weights(extent * extent, 0.0);
+  weights[center * extent + center] = 0.5;
+  const Filter2DPlan plan({extent, extent}, weights.data(), depth_for(depth),
+                          {{}, {center, center}, 0, Border::kReflect101});
+  Image src(image.height, image.width, depth, 3, 1, 7);
+  Image dst(image.height, image.width, depth, 4, 2, 5);
+  src.host.setTo(cv::Scalar::all(31));
+  for (const unsigned parity : {1u, 0u}) {
+    dst.host.setTo(cv::Scalar::all(17));
+    auto input = src.pixels();
+    auto initial = dst.pixels();
+    cv::Mat expected(image.height, image.width, depth);
+    for (int y = 0; y < image.height; ++y) {
+      for (int x = 0; x < image.width; ++x) {
+        const unsigned p = static_cast<Pixel>(2 * (y * image.width + x) + parity);
+        const unsigned q = p / 2;
+        const auto rounded = static_cast<Pixel>(q + ((p & 1u) & (q & 1u)));
+        input.ptr<Pixel>(y)[x] = static_cast<Pixel>(p);
+        expected.ptr<Pixel>(y)[x] = rounded;
+        initial.ptr<Pixel>(y)[x] = static_cast<Pixel>(~rounded);
+      }
+    }
+    execute(handle, upload, use, src, dst, plan.table(), expected,
+            [&](auto& h, const auto& s, const auto& d, auto workspace, auto stream) {
+              flagcv::filter2D(h, s, d, plan, workspace, stream);
+            });
+  }
+}
+
+void filter_half_weight_reference(Handle& handle, const Stream& upload, const Stream& use) {
+  // Only these four fixtures use the exact-half reference documented in numerical-tolerance.md.
+  for (int extent : {13, 17})
+    half_weight_case<std::uint8_t>(handle, upload, use, CV_8U, extent);
+  for (int extent : {9, 11})
+    half_weight_case<std::uint16_t>(handle, upload, use, CV_16U, extent);
+  std::cout << "filter2D 8 exact half-weight fixtures passed\n";
+}
+
 bool gaussian_sigma_boundaries(Handle& handle, const Stream& upload, const Stream& use) {
   bool all_equal = true;
   for (const int depth : {CV_8U, CV_16U}) {
@@ -348,6 +391,10 @@ int main(int argc, char** argv) {
     const Stream upload, default_stream(false), custom;
     if (argc == 2 && std::string_view(argv[1]) == "--gaussian-boundary")
       return gaussian_sigma_boundaries(handle, upload, custom) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--filter2d-half-reference") {
+      filter_half_weight_reference(handle, upload, custom);
+      return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") {
       std::cout << "case,block,direct_sync_us,separable_sync_us,scratch_bytes\n";
       benchmark(handle, custom);
@@ -430,6 +477,7 @@ int main(int argc, char** argv) {
     correlation_case(handle, upload, custom, large_src, large_dst, {9, 9}, larger.data(),
                      {{}, {1, 6}, .25, Border::kReflect101}, cv::BORDER_REFLECT_101);
     std::cout << "filter2D " << passed + 5 << " reference cases passed\n";
+    filter_half_weight_reference(handle, upload, custom);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
