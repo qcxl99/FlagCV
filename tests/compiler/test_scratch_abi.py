@@ -7,6 +7,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "compiler"))
 from flagcv_codegen.scratch_abi import (  # noqa: E402
     require_qualified_compiler,
+    validated_hip_scratch_args,
     validated_scratch_args,
 )
 
@@ -40,6 +41,19 @@ class ScratchABI(unittest.TestCase):
                          SimpleNamespace(name="sample", global_scratch_size=0, profile_scratch_size=32)):
             with self.subTest(metadata=metadata), self.assertRaisesRegex(RuntimeError, "scratch"):
                 validated_scratch_args(metadata, PTX, SIGNATURE)
+
+    def test_hip_pointer_layout_and_absent_global_metadata(self):
+        metadata = SimpleNamespace(name="sample", profile_scratch_size=0)
+        entry = ("define amdgpu_kernel void @sample(ptr addrspace(1) inreg %0, "
+                 "i32 inreg %1, ptr addrspace(1) inreg readnone %2, "
+                 "ptr addrspace(1) inreg readnone %3) #0 {")
+        self.assertEqual(validated_hip_scratch_args(metadata, entry, SIGNATURE), 2)
+        with self.assertRaisesRegex(RuntimeError, "active scratch"):
+            validated_hip_scratch_args(metadata, entry.replace("readnone %2", "readonly %2"),
+                                       SIGNATURE)
+        metadata.global_scratch_size = 4
+        with self.assertRaisesRegex(RuntimeError, "needs scratch"):
+            validated_hip_scratch_args(metadata, entry, SIGNATURE)
 
     def test_checks_emitted_entry(self):
         samples = (None, PTX.replace("sample_param_3", "sample_param_4"),

@@ -79,6 +79,40 @@ if(FLAGCV_TEST_NVIDIA)
     ENVIRONMENT "FLAGCV_DATA_DIR=${overlay}" LABELS "nvidia;gpu" TIMEOUT 120)
 endif()
 
+option(FLAGCV_TEST_HIP "Run the public API matrix on the shared HIP backend" OFF)
+set(FLAGCV_TEST_HIP_DEVICES "1" CACHE STRING "Number of visible HIP test devices")
+if(FLAGCV_TEST_HIP)
+  if(NOT TARGET flagcv_hip)
+    message(FATAL_ERROR "FLAGCV_TEST_HIP requires FLAGCV_BACKENDS=hip")
+  endif()
+  find_package(OpenCV 5 REQUIRED COMPONENTS core)
+  find_package(hip REQUIRED)
+  find_package(Threads REQUIRED)
+  add_executable(flagcv_test_hip cpp/test_nvidia.cpp)
+  target_include_directories(flagcv_test_hip PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  target_link_libraries(flagcv_test_hip PRIVATE flagcv opencv_core hip::host Threads::Threads)
+  target_compile_features(flagcv_test_hip PRIVATE cxx_std_17)
+  target_compile_definitions(flagcv_test_hip PRIVATE FLAGCV_TEST_HIP=1
+    FLAGCV_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
+  flagcv_enable_warnings(flagcv_test_hip)
+  add_test(NAME flagcv.hip.public_api COMMAND flagcv_test_hip "${FLAGCV_TEST_HIP_DEVICES}")
+  set_tests_properties(flagcv.hip.public_api PROPERTIES LABELS "hip;gpu" TIMEOUT 420)
+
+  set(hip_overlay "${CMAKE_CURRENT_BINARY_DIR}/hip-test-data")
+  file(MAKE_DIRECTORY "${hip_overlay}/backends/hip/kernels")
+  file(CREATE_LINK "${PROJECT_SOURCE_DIR}/compiler" "${hip_overlay}/compiler" SYMBOLIC)
+  file(CREATE_LINK "${PROJECT_SOURCE_DIR}/kernels" "${hip_overlay}/kernels" SYMBOLIC)
+  file(CREATE_LINK "${PROJECT_SOURCE_DIR}/backends/hygon/compiler.py"
+    "${hip_overlay}/backends/hip/compiler.py" SYMBOLIC)
+  file(WRITE "${hip_overlay}/backends/hip/kernels/registry.json" [=[
+{"kernels":[{"name":"add","source":"../../../kernels/common/pointwise.py",
+             "function":"flagcv_missing_nvidia_entry"}]}
+]=])
+  add_test(NAME flagcv.hip.platform_failure COMMAND flagcv_test_hip --platform-failure)
+  set_tests_properties(flagcv.hip.platform_failure PROPERTIES LABELS "hip;gpu" TIMEOUT 120
+    ENVIRONMENT "FLAGCV_DATA_DIR=${hip_overlay}")
+endif()
+
 option(FLAGCV_BENCHMARK_NVIDIA "Build the NVIDIA C++ OpenCV CUDA benchmark" OFF)
 if(FLAGCV_BENCHMARK_NVIDIA)
   if(NOT TARGET flagcv_nvidia)

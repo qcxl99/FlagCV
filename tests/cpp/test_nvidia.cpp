@@ -17,6 +17,12 @@
 #include <thread>
 
 namespace {
+#ifdef FLAGCV_TEST_HIP
+constexpr auto test_backend = "hip";
+#else
+constexpr auto test_backend = "nvidia";
+#endif
+
 using namespace flagcv_test;
 
 void fill_bytes(cv::Mat& image, cv::RNG& rng) {
@@ -339,7 +345,7 @@ void cases(flagcv::Handle& handle) {
 
 void platform_failure() {
   cuda_check(cudaSetDevice(0));
-  flagcv::Handle handle;
+  flagcv::Handle handle(test_backend);
   Stream stream;
   Image src(4, 8, CV_8U), dst(4, 8, CV_8U);
   src.host.setTo(13);
@@ -371,9 +377,9 @@ void independent_handles(int device) {
     require(cv::countNonZero(output != static_cast<unsigned char>(~pixel)) == 0,
             "concurrent handle returned the wrong output");
   };
-  flagcv::Handle survivor("nvidia", device);
+  flagcv::Handle survivor(test_backend, device);
   auto first = std::async(std::launch::async, [&] {
-    flagcv::Handle transient("nvidia", device);
+    flagcv::Handle transient(test_backend, device);
     exercise(transient, 13);
   });
   auto second = std::async(std::launch::async, [&] { exercise(survivor, 42); });
@@ -385,7 +391,7 @@ void independent_handles(int device) {
 void across_devices(int device_count) {
   std::vector<std::unique_ptr<flagcv::Handle>> handles;
   for (int device = 0; device < device_count; ++device)
-    handles.push_back(std::make_unique<flagcv::Handle>("nvidia", device));
+    handles.push_back(std::make_unique<flagcv::Handle>(test_backend, device));
   for (int device = 0; device < device_count; ++device) {
     cuda_check(cudaSetDevice(device));
     auto& handle = *handles[device];
@@ -416,13 +422,13 @@ int main(int argc, char** argv) {
     int count = 0;
     cuda_check(cudaGetDeviceCount(&count));
     const int requested = argc == 2 ? std::stoi(argv[1]) : 1;
-    require(requested >= 1 && requested <= count, "requested NVIDIA GPUs unavailable");
+    require(requested >= 1 && requested <= count, "requested GPUs unavailable");
     for (int device = 0; device < requested; ++device) {
       cuda_check(cudaSetDevice(device));
-      flagcv::Handle handle("nvidia", device);
+      flagcv::Handle handle(test_backend, device);
       cases(handle);
       independent_handles(device);
-      std::cout << "NVIDIA device " << device << " passed public API matrix\n";
+      std::cout << test_backend << " device " << device << " passed public API matrix\n";
     }
     across_devices(requested);
     return 0;

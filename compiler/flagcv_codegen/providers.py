@@ -46,7 +46,7 @@ def plan_flip(request, facts=None):
     the element size, so wide elements do not blow past it, and are capped at
     a power of two for the vectorised axis.
     """
-    facts = facts or platform(request["backend"])
+    facts = facts or platform(request["backend"], request["target"])
     size = DEPTH_SIZE[request["images"][0]["depth"]]
     block_x = _power_of_two_at_most(max(facts["tile"] // size, 64))
     block_y = 4
@@ -89,7 +89,7 @@ PLANS["flip"] = plan_flip
 
 def compile_with_plan(request):
     """Dispatch a compile request to the kernel's plan for this platform."""
-    facts = platform(request["backend"])
+    facts = platform(request["backend"], request["target"])
     plan = PLANS.get(request["kernel"])
     if plan is None:
         raise ValueError(

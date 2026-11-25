@@ -31,7 +31,10 @@ def canonical(value):
 
 def digest(path):
     with path.open("rb") as f:
-        return hashlib.file_digest(f, "sha256").hexdigest()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+        return digest.hexdigest()
 
 
 def positive(value):

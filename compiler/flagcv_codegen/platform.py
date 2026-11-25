@@ -51,7 +51,7 @@ PLATFORM = {
         "load_flags": 1,
     },
     "hygon": {
-        "triton_backend": "hcu",
+        "triton_backend": "hip",
         "binary": "hsaco",
         "extension": "hsaco",
         "warp": 64,
@@ -82,7 +82,12 @@ PLATFORM = {
 }
 
 
-def platform(backend):
+def platform(backend, target=None):
+    if backend in ("hip", "hygon"):
+        hip_targets = {"hip:gfx936:64": 64, "hip:gfx938:64": 64, "hip:gfx1100:32": 32}
+        if target not in hip_targets:
+            raise ValueError(f"unsupported HIP target {target!r}")
+        return dict(PLATFORM["hygon"], warp=hip_targets[target])
     entry = PLATFORM.get(backend)
     if entry is None:
         raise ValueError(f"no platform facts for backend {backend!r}")

@@ -6,9 +6,15 @@
 import re
 
 
-def require_qualified_compiler(backend, target, version):
+def require_qualified_compiler(backend, target, version, arch=None, compiler_module=None):
     # Triton v3.6.0 NVIDIA's launcher appends global and profile scratch
     # pointers, in that order. Qualify vendor launchers separately.
+    hip_compilers = {"gfx936": "triton.backends.hcu.compiler",
+                     "gfx938": "triton.backends.hcu.compiler",
+                     "gfx1100": "triton.backends.amd.compiler"}
+    if (backend in ("hip", "hygon") and target == "hip" and version == "3.6.0"
+            and compiler_module is not None and hip_compilers.get(arch) == compiler_module):
+        return
     if (backend, target, version) != ("nvidia", "cuda", "3.6.0"):
         raise RuntimeError(
             f"scratch ABI is unqualified for {backend}/{target} with Triton {version}"
@@ -46,4 +52,29 @@ def validated_scratch_args(metadata, ptx, signature):
             actual.append((match[1], bool(match[2])))
     if len(actual) != len(params) or actual != expected:
         raise RuntimeError(f"{metadata.name} has an unexpected CUDA entry parameter ABI")
+    return 2
+
+
+def validated_hip_scratch_args(metadata, llir, signature):
+    # These HIP launchers send two pointer slots and explicitly zero the
+    # global one. The compiler may omit global_scratch_size. In that case,
+    # accept it only with IR proof that the tail arguments are not used.
+    profile = getattr(metadata, "profile_scratch_size", None)
+    global_size = getattr(metadata, "global_scratch_size", None)
+    explicit_global = hasattr(metadata, "global_scratch_size")
+    if (type(profile) is not int or profile != 0
+            or (explicit_global and (type(global_size) is not int or global_size != 0))):
+        raise RuntimeError("HIP kernel needs scratch storage or has invalid scratch metadata")
+    entry = re.search(r"^define.*?amdgpu_kernel void @" + re.escape(metadata.name)
+                      + r"\((.*)\)[^{\n]*\{", llir or "", re.MULTILINE)
+    if not entry:
+        raise RuntimeError("missing compiled HIP kernel entry ABI")
+    params = [arg.strip() for arg in entry[1].split(",")]
+    expected = ["ptr addrspace(1)" if kind.startswith("*") else kind
+                for kind in signature.values() if kind != "constexpr"]
+    expected.extend(["ptr addrspace(1)", "ptr addrspace(1)"])
+    if (len(params) != len(expected) or any(not arg.startswith(kind + " ")
+            for arg, kind in zip(params, expected))
+            or any(not re.search(r"\breadnone\b", arg) for arg in params[-2:])):
+        raise RuntimeError("unexpected HIP entry ABI or active scratch pointer")
     return 2

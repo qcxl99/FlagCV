@@ -17,7 +17,7 @@ to this standalone repository, use [the FlagCV merge requirements](CONTRIBUTING.
 On Linux, the runtime build uses:
 
 - CMake 3.23+ and a C++17 compiler
-- Python 3.11+ for the merge checker, with upstream Triton for NVIDIA or the backend's supported [FlagTree/Triton distribution](https://github.com/flagos-ai/flagtree).
+- Python 3.10+ for the merge checker, with upstream Triton for NVIDIA or the backend's supported [FlagTree/Triton distribution](https://github.com/flagos-ai/flagtree).
 
 Plus the toolchain of the backend you build. `libflagcv` itself links no vendor SDK and no CUDA: it reaches the device only through a `dlopen`'d plugin, so selecting a backend never changes the core.
 
@@ -25,7 +25,8 @@ Plus the toolchain of the backend you build. `libflagcv` itself links no vendor 
 |---|---|
 | `nvidia` | CUDA driver API (`CUDA::cuda_driver`) |
 | `iluvatar` | CUDA-compatible driver API (`CUDA::cuda_driver`) |
-| `hygon` | HIP runtime |
+| `hip` | HIP runtime from ROCm or DTK |
+| `hygon` | Legacy name for the shared HIP plugin |
 | `mthreads` | MUSA runtime |
 | `thead` | PPU driver API (`CUstream`), T-Head PPU SDK |
 
@@ -40,9 +41,10 @@ Ascend C++ is unavailable in this build. Selecting `ascend` in
 `FLAGCV_BACKENDS` fails at configure time. Enablement requires verification
 with an application-owned AscendCL context, buffers and stream.
 
-The public C++ launcher currently qualifies NVIDIA with Triton 3.6.0.
-See [scratch ABI qualification](docs/architecture.md#scratch-abi-qualification)
-for the supported native launch scope.
+The shared HIP backend uses the same module and stream API on AMD ROCm and
+Hygon DTK. See [HIP validation](docs/hip-validation.md) for the device matrix
+and [scratch ABI qualification](docs/architecture.md#scratch-abi-qualification)
+for the native launch boundary.
 
 ## Build and test
 

@@ -3,7 +3,11 @@
 
 #pragma once
 
+#ifdef FLAGCV_TEST_HIP
+#include "hip_test_api.hpp"
+#else
 #include <cuda_runtime_api.h>
+#endif
 
 #include <cmath>
 #include <cstring>
@@ -25,7 +29,7 @@ inline void cuda_check(cudaError_t status) {
 class DeviceMemory {
  public:
   explicit DeviceMemory(std::size_t bytes) { cuda_check(cudaMalloc(&ptr, bytes)); }
-  ~DeviceMemory() { cudaFree(ptr); }
+  ~DeviceMemory() { (void)cudaFree(ptr); }
   DeviceMemory(const DeviceMemory&) = delete;
   DeviceMemory& operator=(const DeviceMemory&) = delete;
   void* ptr = nullptr;
@@ -36,7 +40,7 @@ class Stream {
   explicit Stream(bool custom = true) {
     if (custom) cuda_check(cudaStreamCreateWithFlags(&value, cudaStreamNonBlocking));
   }
-  ~Stream() { if (value) cudaStreamDestroy(value); }
+  ~Stream() { if (value) (void)cudaStreamDestroy(value); }
   Stream(const Stream&) = delete;
   Stream& operator=(const Stream&) = delete;
   void wait() const { cuda_check(cudaStreamSynchronize(value)); }

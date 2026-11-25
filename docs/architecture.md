@@ -97,7 +97,16 @@ zero. It also verifies the emitted PTX entry layout against the Runtime
 signature, including the two trailing 64-bit pointer parameters. The Runtime
 compares that count with the backend expectation before loading the binary.
 
-Iluvatar, Hygon, MThreads, T-Head and Ascend need their exact compiler build,
+The shared HIP plugin accepts a bounded FlagTree 3.6.0 compiler/target set
+(gfx936, gfx938 and gfx1100). Both qualified compiler families emit two
+trailing pointer slots. FlagCV validates their LLVM entry signature and
+checks that both pointers have the `readnone` attribute. The profile scratch
+size must be explicitly zero. Some HIP compilers omit the global size, so
+the unused-pointer proof is required per artifact. An explicit nonzero size
+is rejected. Platform delivery status also requires on-device correctness
+and installation evidence.
+
+Iluvatar, MThreads, T-Head and Ascend need their exact compiler build,
 emitted argument layout, scratch metadata semantics and an on-device public API
 test before enabling native launch. Ascend is excluded from C++ builds until
 its device lifecycle is qualified. Its source rejects Handle creation without
@@ -158,7 +167,7 @@ broken the contract.
 |---|---|---|---|---|
 | `nvidia` | `cuda.h` | `.cubin` | 32 | |
 | `iluvatar` | CoreX `cuda.h` | `.cubin` | 64 | needs `CUDAToolkit_ROOT` pointed at CoreX |
-| `hygon` | `hip/hip_runtime.h` | `.hsaco` | 64 | |
+| `hip` / `hygon` | `hip/hip_runtime.h` | `.hsaco` | 32 or 64 | shared ROCm/DTK driver |
 | `mthreads` | `musa.h` | `.mubin` | 32 | Triton backend name is `mtgpu` |
 | `thead` | `hggc.h` | `.hgbin` | 32 | Triton backend name is `PPU` |
 | `ascend` (unavailable) | `acl/acl.h`, `rt.h` | `.npubin` | 1 | preview source, excluded from C++ builds |

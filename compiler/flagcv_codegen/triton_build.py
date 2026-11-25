@@ -22,7 +22,9 @@ from triton.backends.compiler import GPUTarget
 from triton.runtime.cache import triton_key
 
 from flagcv_codegen import platform as platforms
-from flagcv_codegen.scratch_abi import require_qualified_compiler, validated_scratch_args
+from flagcv_codegen.scratch_abi import (
+    require_qualified_compiler, validated_hip_scratch_args, validated_scratch_args,
+)
 
 # Kernel pointer element types, keyed by the depth names the runtime sends.
 DEPTH_TO_TRITON = {
@@ -138,7 +140,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     launch-grid spec returned to the runtime, which evaluates it against the
     runtime parameter values it never sent here.
     """
-    facts = platforms.platform(request["backend"])
+    facts = platforms.platform(request["backend"], request["target"])
     fn = load_jit_function(request["source"], request["function"])
     _check_arguments(fn, request, tuning)
 
@@ -166,8 +168,9 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         raise ValueError(
             f"{request['backend']} cannot compile target {request['target']!r}"
         )
-    require_qualified_compiler(request["backend"], target.backend, triton.__version__)
     backend = triton.compiler.make_backend(target)
+    require_qualified_compiler(request["backend"], target.backend, triton.__version__,
+                               target.arch, type(backend).__module__)
     options = backend.parse_options({"num_warps": num_warps, "num_stages": num_stages})
     # Deliberately no fn.create_binder(): it probes the active driver, which
     # imports torch and initialises a device. ASTSource compilation does not
@@ -178,7 +181,10 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     compiled = triton.compile(source, target=target, options=options.__dict__)
 
     metadata = compiled.metadata
-    scratch_args = validated_scratch_args(metadata, compiled.asm.get("ptx"), signature)
+    if target.backend == "hip":
+        scratch_args = validated_hip_scratch_args(metadata, compiled.asm.get("llir"), signature)
+    else:
+        scratch_args = validated_scratch_args(metadata, compiled.asm.get("ptx"), signature)
 
     # The image Triton emits is platform specific: cubin on CUDA-shaped
     # vendors, hsaco/mubin/hgbin on the others, npubin on Ascend.
