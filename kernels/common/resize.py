@@ -603,3 +603,65 @@ def _resize_copy(src_ptr, dst_ptr, dst_h, W, src_rs, dst_rs, src_bs, dst_bs, bat
         source = src_ptr + b * src_bs + rows * src_rs + cols
         target = dst_ptr + b * dst_bs + rows * dst_rs + cols
         tl.store(target, tl.load(source, mask=inside, other=0), mask=inside)
+
+
+@triton.jit
+def _area_mix(a, b, first: tl.constexpr, second: tl.constexpr):
+    return (0.0 + a * first) + b * second
+
+
+@triton.jit
+def _resize_area_polyphase_kernel(
+    src_ptr, dst_ptr, xs_ptr, xa_ptr, xc_ptr, ys_ptr, ya_ptr, yc_ptr, KX, KY,
+    dst_h, W, cn: tl.constexpr, src_rs, dst_rs, src_bs, dst_bs, batch_count, dst_w,
+    U8: tl.constexpr, POLYPHASE: tl.constexpr, BLOCK_H: tl.constexpr,
+    BLOCK_W: tl.constexpr, BATCH_GRID_LIMIT: tl.constexpr,
+):
+    if not POLYPHASE:
+        _resize_cpu_area_kernel(src_ptr, dst_ptr, xs_ptr, xa_ptr, xc_ptr,
+                                ys_ptr, ya_ptr, yc_ptr, KX, KY, dst_h, W, cn,
+                                src_rs, dst_rs, src_bs, dst_bs, batch_count, dst_w,
+                                U8, False, BLOCK_H, BLOCK_W, BATCH_GRID_LIMIT)
+    else:
+        row, col, batch = _resize_tiles(dst_w, BLOCK_H, 2 * BLOCK_W, BATCH_GRID_LIMIT)
+        if batch < batch_count:
+            # One lane group covers four channels of a 3x3 source block.
+            # Paired rows are complete by the host phase check.
+            x = col // 2 + tl.arange(0, BLOCK_W)
+            channel = tl.arange(0, 4)
+            live = (x < dst_w // 2)[:, None]
+            src = src_ptr + batch * src_bs + (3 * (row // 2)) * src_rs
+            src += 12 * x[:, None] + channel[None, :]
+            dst = dst_ptr + batch * dst_bs + row * dst_rs
+            dst += 8 * x[:, None] + channel[None, :]
+            two_thirds: tl.constexpr = 0.6666666865348816
+            one_third: tl.constexpr = 0.3333333432674408
+
+            s00 = tl.load(src, mask=live, other=0).to(tl.float32)
+            s01 = tl.load(src + 4, mask=live, other=0).to(tl.float32)
+            s02 = tl.load(src + 8, mask=live, other=0).to(tl.float32)
+            s10 = tl.load(src + src_rs, mask=live, other=0).to(tl.float32)
+            s11 = tl.load(src + src_rs + 4, mask=live, other=0).to(tl.float32)
+            s12 = tl.load(src + src_rs + 8, mask=live, other=0).to(tl.float32)
+            s20 = tl.load(src + 2 * src_rs, mask=live, other=0).to(tl.float32)
+            s21 = tl.load(src + 2 * src_rs + 4, mask=live, other=0).to(tl.float32)
+            s22 = tl.load(src + 2 * src_rs + 8, mask=live, other=0).to(tl.float32)
+            left0 = _area_mix(s00, s01, two_thirds, one_third)
+            right0 = _area_mix(s01, s02, one_third, two_thirds)
+            left1 = _area_mix(s10, s11, two_thirds, one_third)
+            right1 = _area_mix(s11, s12, one_third, two_thirds)
+            left2 = _area_mix(s20, s21, two_thirds, one_third)
+            right2 = _area_mix(s21, s22, one_third, two_thirds)
+            q00 = _area_mix(left0, left1, two_thirds, one_third)
+            q01 = _area_mix(right0, right1, two_thirds, one_third)
+            q10 = _area_mix(left1, left2, one_third, two_thirds)
+            q11 = _area_mix(right1, right2, one_third, two_thirds)
+            if U8:
+                q00 = tl.minimum(tl.maximum(_round_even(q00), 0.0), 255.0).to(tl.uint8)
+                q01 = tl.minimum(tl.maximum(_round_even(q01), 0.0), 255.0).to(tl.uint8)
+                q10 = tl.minimum(tl.maximum(_round_even(q10), 0.0), 255.0).to(tl.uint8)
+                q11 = tl.minimum(tl.maximum(_round_even(q11), 0.0), 255.0).to(tl.uint8)
+            tl.store(dst, q00, mask=live)
+            tl.store(dst + 4, q01, mask=live)
+            tl.store(dst + dst_rs, q10, mask=live)
+            tl.store(dst + dst_rs + 4, q11, mask=live)

@@ -40,6 +40,26 @@ std::vector<int> nearest_offsets(int dst, int src, double inverse) {
   return offsets;
 }
 
+bool matches_area_polyphase(const resize_tables::AreaTab& table, int source,
+                            int destination, double scale) {
+  if (scale != 1.5 || destination % 2 != 0 || source != 3 * (destination / 2) ||
+      table.taps != 2)
+    return false;
+  constexpr float two_thirds = 2.0f / 3.0f;
+  constexpr float one_third = 1.0f / 3.0f;
+  for (int output = 0; output < destination; ++output) {
+    const int first = 3 * (output / 2) + output % 2;
+    const int tap = output * 2;
+    const bool odd = output % 2 != 0;
+    if (table.count[output] != 2 || table.src_index[tap] != first ||
+        table.src_index[tap + 1] != first + 1 ||
+        table.alpha[tap] != (odd ? one_third : two_thirds) ||
+        table.alpha[tap + 1] != (odd ? two_thirds : one_third))
+      return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 ResizePlan::ResizePlan(Size source, Depth depth, int channels, ResizeOptions options) {
@@ -109,6 +129,9 @@ ResizePlan::ResizePlan(Size source, Depth depth, int channels, ResizeOptions opt
       const auto y = area_tab(source.height, destination.height, 1.0 / size.inv_y);
       data->kx = x.taps;
       data->ky = y.taps;
+      data->area_polyphase = channels == 4 &&
+          matches_area_polyphase(x, source.width, destination.width, 1.0 / size.inv_x) &&
+          matches_area_polyphase(y, source.height, destination.height, 1.0 / size.inv_y);
       data->append("xs", Depth::k32S, x.src_index);
       data->append("xa", Depth::k32F, x.alpha);
       data->append("xc", Depth::k32S, x.count);

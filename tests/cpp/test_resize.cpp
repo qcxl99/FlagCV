@@ -141,7 +141,7 @@ flagcv::GpuMat subview(const Image& backing, const cv::Rect& roi) {
 }
 
 void run_batch(flagcv::Handle& handle, const Stream& stream, Size in, ResizeOptions options,
-               int channels) {
+               int channels, bool direct_cpu = false) {
   constexpr int count = 3;
   const ResizePlan plan(in, flagcv::Depth::k8U, channels, options);
   const Size out = plan.destination_size();
@@ -162,7 +162,14 @@ void run_batch(flagcv::Handle& handle, const Stream& stream, Size in, ResizeOpti
                       plan, tables.view(), stream.value);
   auto got = dest.download(stream);
   for (int n = 0; n < count; ++n) {
-    compare(got(dst_roi), reference(source.host(src_roi), out, options), options.interpolation);
+    cv::Mat expected;
+    if (direct_cpu) {
+      cv::resize(source.host(src_roi), expected, {options.size.width, options.size.height},
+                 options.fx, options.fy, static_cast<int>(options.interpolation));
+    } else {
+      expected = reference(source.host(src_roi), out, options);
+    }
+    compare(got(dst_roi), expected, options.interpolation);
     dest.host(dst_roi).copyTo(got(dst_roi));
     src_roi.y += source_rows;
     dst_roi.y += destination_rows;
@@ -185,6 +192,8 @@ void check_independent_cpu(flagcv::Handle& handle, const Stream& stream) {
       {"two-tap-area-4k-c4-u8", {3840, 2160}, {{2560, 1440}, 0, 0, Interpolation::kArea}, CV_8UC4},
       {"two-tap-area-1080p-c4-f32", {1920, 1080}, {{1280, 720}, 0, 0, Interpolation::kArea}, CV_32FC4},
       {"area-different-phase-same-rounded-size", {1920, 1080}, {{}, .6665, .6665, Interpolation::kArea}, CV_8UC4},
+      {"three-to-two-area-partial-tile-c4", {771, 9}, {{514, 6}, 0, 0, Interpolation::kArea}, CV_8UC4},
+      {"three-to-two-area-c3-fallback", {771, 9}, {{514, 6}, 0, 0, Interpolation::kArea}, CV_8UC3},
       {"fractional-area", {37, 29}, {{17, 13}, 0, 0, Interpolation::kArea}, CV_8UC3},
       {"mixed-area-up-down", {31, 11}, {{13, 23}, 0, 0, Interpolation::kArea}, CV_8UC1},
       {"noninteger-fx-fy", {19, 17}, {{}, 0.664, 1.37, Interpolation::kLinear}, CV_8UC4},
@@ -298,6 +307,39 @@ void check_wide_area_sum(flagcv::Handle& handle, const Stream& stream) {
   require(dst.download(stream).at<std::uint8_t>(0, 0) == 255, "wide AREA sum overflowed");
 }
 
+void check_area_gradient(flagcv::Handle& handle, const Stream& stream) {
+  constexpr Size from{771, 9};
+  constexpr Size to{514, 6};
+  for (int depth : {CV_8U, CV_32F}) {
+    const int type = CV_MAKETYPE(depth, 4);
+    Image src(from.height, from.width, type, 3, 2, 5);
+    Image dst(to.height, to.width, type, 1, 3, 3);
+    src.host.setTo(cv::Scalar::all(6));
+    dst.host.setTo(cv::Scalar::all(17));
+    auto input = src.pixels();
+    for (int y = 0; y < input.rows; ++y) {
+      for (int x = 0; x < input.cols; ++x) {
+        for (int c = 0; c < 4; ++c) {
+          if (depth == CV_8U)
+            input.ptr<std::uint8_t>(y)[4 * x + c] = static_cast<std::uint8_t>(3 * x + 13 * y + 29 * c);
+          else
+            input.ptr<float>(y)[4 * x + c] = static_cast<float>(x - 385) / 1024.0f + y / 32.0f + c / 8.0f;
+        }
+      }
+    }
+    cv::Mat expected;
+    cv::resize(src.pixels(), expected, {to.width, to.height}, 0, 0, cv::INTER_AREA);
+    const ResizePlan plan(from, flagcv_test::depth_for(depth), 4, {to, 0, 0, Interpolation::kArea});
+    Tables table(plan, stream);
+    src.upload(stream.value);
+    dst.upload(stream.value);
+    flagcv::resize(handle, src.view(), dst.view(), plan, table.view(), stream.value);
+    compare_roi(dst, dst.download(stream), expected, Interpolation::kArea);
+    require(bytes_equal(src.host, src.download(stream)), "gradient source was modified");
+    std::cout << "PASS C4 independent CPU gradient depth=" << depth << '\n';
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -311,7 +353,14 @@ int main(int argc, char** argv) {
 #endif
     const Stream native, default_stream(false);
     check_independent_cpu(handle, native);
+    if (argc == 2 && std::string_view(argv[1]) == "--area-polyphase") {
+      check_area_gradient(handle, native);
+      run_batch(handle, native, {771, 9}, {{514, 6}, 0, 0, Interpolation::kArea}, 4, true);
+      std::cout << "independent CPU PASS AREA C4 batch with separate pitches\n";
+      return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--independent-cpu") return 0;
+    check_area_gradient(handle, native);
     reject_cases(handle, native);
     for (auto mode : modes) {
       for (int channels : {1, 3, 4}) {
