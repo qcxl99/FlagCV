@@ -17,7 +17,7 @@ to this standalone repository, use [the FlagCV merge requirements](CONTRIBUTING.
 On Linux, the runtime build uses:
 
 - CMake 3.23+ and a C++17 compiler
-- Python 3 with upstream Triton for NVIDIA or the backend's supported [FlagTree/Triton distribution](https://github.com/flagos-ai/flagtree).
+- Python 3.11+ for the merge checker, with upstream Triton for NVIDIA or the backend's supported [FlagTree/Triton distribution](https://github.com/flagos-ai/flagtree).
 
 Plus the toolchain of the backend you build. `libflagcv` itself links no vendor SDK and no CUDA: it reaches the device only through a `dlopen`'d plugin, so selecting a backend never changes the core.
 
@@ -42,6 +42,12 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFLAGCV_WARNINGS_AS_ERRORS=ON
 cmake --build build --parallel
 ctest --test-dir build -L host --output-on-failure
 ```
+
+For a host-only check without a vendor SDK, use
+`python tools/check_merge.py --profile host --output /path/to/new-host-evidence`.
+The installed consumer uses the shared Runtime for automatic discovery of
+relocated plugins and data. Static linking can use `FLAGCV_DATA_DIR` and
+`FLAGCV_PLUGIN_DIR` to select those installed resources explicitly.
 
 Enable `FLAGCV_TEST_NVIDIA` to build the public C++ API and backend failure tests with OpenCV CPU 5. See [NVIDIA validation](docs/nvidia-validation.md) for the complete test and benchmark commands.
 

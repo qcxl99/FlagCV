@@ -45,8 +45,8 @@ measurements with the same Triton event timer. Failures are reported directly;
 there is no CPU or historical-data fallback. Inputs and outputs are allocated
 before timing, and first-call compilation is outside timed samples.
 
-Use `--benchmark-samples` to set the number of paired measurements. The reported
-latencies are medians of the samples. They describe steady-state device work;
+The default two paired medians are averaged. Use `--benchmark-profile long`
+for the three-round median or `--benchmark-samples` for an exploratory count. They describe steady-state device work;
 build time, CPU submission time and transfers are not separate reported metrics.
 Use `--baseline none` explicitly for candidate-only timing on another backend.
 Case listing, dummy probes and profile mode do not load the OpenCV bridge.

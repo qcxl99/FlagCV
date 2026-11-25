@@ -19,7 +19,8 @@ is zero. Multiply defaults to scale 1 and accepts finite explicit 32F scale.
 The supported depth/channel matrix is recorded in the operator inventory.
 
 Calls enqueue on the supplied native stream (default `nullptr`). The caller
-owns the stream and device buffers and synchronizes before reading results
+owns the stream and device buffers on the Handle's device and synchronizes
+before reading results
 or releasing storage. The caller retains the Handle until the stream has
 finished its enqueued FlagCV work. One Handle binds one backend and device.
 Use distinct Handles for simultaneous calls on different host threads.

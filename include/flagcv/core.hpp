@@ -21,8 +21,9 @@
  *
  * `handle` leads because it carries the backend and the kernel cache;
  * `stream` trails with a default so the common call reads like OpenCV. Calls
- * enqueue and do not synchronize. Operand validation belongs in
- * src/lowering/, never in the entry point. See docs/operator-development.md.
+ * enqueue on the supplied stream. The caller keeps buffers, stream and Handle
+ * alive until the work completes. The allocation and stream must belong to
+ * the Handle's device. See docs/cpp-operators.md.
  */
 namespace flagcv {
 

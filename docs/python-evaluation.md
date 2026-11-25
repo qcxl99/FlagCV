@@ -51,7 +51,13 @@ Performance comparisons default to `--baseline opencv-cuda`. Each case uses the
 same source tensors with independent preallocated outputs. The runner validates
 candidate and OpenCV outputs against OpenCV CPU and each other before
 sampling, and checks that inputs are unchanged. It alternates the measurement
-order over `--benchmark-samples` paired samples and reports median latencies.
+order over two paired samples by default (100 ms Triton warmup, 100 ms
+measurement). The timer explicitly requests the median for each round, and the
+two round medians are averaged independently for FlagCV and OpenCV CUDA.
+Use `--benchmark-profile long` for 1000 ms warmup and three pairs, aggregated
+with a median. Both profiles keep the same 100 ms measurement window.
+`--benchmark-samples` can override the count for exploratory runs. The NVIDIA
+merge checker requires the declared profile's exact count and protocol.
 OpenCV errors and missing bridge libraries fail the case. Use `--baseline none`
 explicitly for candidate-only timing; other backends need this mode.
 

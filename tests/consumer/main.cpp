@@ -3,6 +3,7 @@
 
 #include <flagcv/flagcv.hpp>
 
+#ifdef FLAGCV_CONSUMER_NVIDIA
 #include <cuda_runtime_api.h>
 
 #include <array>
@@ -33,10 +34,24 @@ int main() {
     for (int i = 0; i < 3; ++i) flagcv::flip(handle, src_view, dst_view, 1);
     check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
     if (values != std::array<unsigned char, 8>{4, 3, 2, 1, 8, 7, 6, 5})
-      throw std::runtime_error("installed runtime returned incorrect output");
+      throw std::runtime_error("installed flip returned incorrect output");
+    flagcv::add(handle, src_view, src_view, dst_view);
+    check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
+    if (values != std::array<unsigned char, 8>{2, 4, 6, 8, 10, 12, 14, 16})
+      throw std::runtime_error("installed add returned incorrect output");
+    flagcv::bitwise_not(handle, src_view, dst_view);
+    check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
+    if (values != std::array<unsigned char, 8>{254, 253, 252, 251, 250, 249, 248, 247})
+      throw std::runtime_error("installed bitwise_not returned incorrect output");
     return 0;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;
   }
 }
+#else
+int main() {
+  const flagcv::GpuMat view(nullptr, 4, 2, flagcv::Depth::k16U, 3);
+  return view.row_pitch() == 24 && view.row_stride() == 12 ? 0 : 1;
+}
+#endif

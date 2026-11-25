@@ -282,7 +282,7 @@ from helpers import benchmark
 def fake_timer(monkeypatch):
     module = __import__(__name__, fromlist=[""])
     monkeypatch.setattr(module, "make_inputs", lambda *a: (1,))
-    monkeypatch.setattr(benchmark, "_measure_ms", lambda *a: 1.0)
+    monkeypatch.setattr(benchmark, "_measure_ms", lambda *a, **kw: 1.0)
     monkeypatch.setattr(benchmark, "_validate_outputs", lambda *a: None)
 """
     )
@@ -318,7 +318,7 @@ def fake_timing(monkeypatch):
         if Path("missing.txt").exists():
             raise RuntimeError("OpenCV bridge unavailable")
         return Baseline(), (5,)
-    def measure_ms(function, args):
+    def measure_ms(function, args, *, warmup_ms):
         function(*args)
         return 0.008 if args == (5,) else 0.002
     monkeypatch.setattr(module, "make_inputs", lambda *a: (1,))
@@ -350,7 +350,7 @@ def fake_timing(monkeypatch):
     rows = json.loads((suite.path / "result.json").read_text())["add"]["details"]
     (case,) = rows[0]["result"]
     assert case["latency"] == pytest.approx(0.002)
-    assert case["latency_samples_ms"] == [0.002] * 3
+    assert case["latency_samples_ms"] == [0.002] * 2
     if baseline == "live":
         assert case["base_latency_ms"] == pytest.approx(0.008)
         assert case["base_raw_speedup"] == pytest.approx(4.0)
@@ -560,3 +560,33 @@ def test_probe(candidate, pytestconfig, request):
     report = json.loads((suite.path / "dummy-candidate-report.json").read_text())
     assert report["status"] == "FAILED"
     assert any(row["status"] == "POST_CALL_ERROR" for row in report["records"])
+
+
+@pytest.mark.parametrize("args,warmup,samples", [
+    ([], 100, 2),
+    (["--benchmark-profile", "long"], 1000, 3),
+    (["--benchmark-samples", "1"], 100, 1),
+])
+def test_benchmark_profiles_reach_timer(suite, args, warmup, samples):
+    suite.makepyfile(test_probe="""
+import pytest
+from helpers import benchmark
+
+def test_configuration(pytestconfig, monkeypatch):
+    called = []
+    monkeypatch.setattr(benchmark, "_validate_outputs", lambda *args: None)
+
+    def measure(function, operands, *, warmup_ms):
+        called.append(warmup_ms)
+        function(*operands)
+        return 0.01
+
+    monkeypatch.setattr(benchmark, "_measure_ms", measure)
+    report = benchmark._time_case(pytestconfig, "add", lambda: None, ())
+    assert called == [report["warmup_ms"]] * pytestconfig.option.benchmark_samples
+    assert len(called) == EXPECTED_SAMPLES
+    assert report["warmup_ms"] == EXPECTED_WARMUP
+    assert report["measurement_ms"] == 100
+""".replace("EXPECTED_SAMPLES", str(samples)).replace("EXPECTED_WARMUP", str(warmup)))
+    result = suite.runpytest_subprocess("-q", "--baseline", "none", *args)
+    result.assert_outcomes(passed=1)

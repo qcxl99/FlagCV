@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from helpers.benchmark_protocol import PROFILES
 from reference import get_reference
 from runtime import resolve_device
 
@@ -72,7 +73,10 @@ def pytest_addoption(parser):
     group.addoption(
         "--baseline", choices=("opencv-cuda", "none"), default="opencv-cuda"
     )
-    group.addoption("--benchmark-samples", type=int, default=3)
+    group.addoption("--benchmark-profile", choices=tuple(PROFILES), default="default",
+                    help="Python timing preset: default 100 ms/two pairs, long 1000 ms/three pairs")
+    group.addoption("--benchmark-samples", type=int,
+                    help="Override the timing preset's paired sample count")
     group.addoption("--reference", metavar="FILE:FUNCTION", help="Independent oracle")
 
 
@@ -121,6 +125,8 @@ def pytest_configure(config):
             raise pytest.UsageError(
                 "Candidate validation requires execution without xdist"
             )
+    if config.getoption("benchmark_samples") is None:
+        config.option.benchmark_samples = PROFILES[config.getoption("benchmark_profile")].samples
     if config.getoption("benchmark_samples") < 1:
         raise pytest.UsageError("--benchmark-samples must be positive")
     for operator in OPERATORS:

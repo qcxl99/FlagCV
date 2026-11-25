@@ -13,8 +13,8 @@
 | bitwise_not | 0.949× / 0.978× | 2.654× / 2.691× |
 | flip | 0.919× / 0.910× | 2.515× / 2.482× |
 
-比值为 OpenCV CUDA 中位延迟除以 FlagCV 中位延迟。四份报告均达到逐例
-`0.90×` 目标。[C++ 卡 0](cpp-0.csv) · [C++ 卡 1](cpp-1.csv) ·
+比值为 OpenCV CUDA 中位延迟除以 FlagCV 中位延迟。四份报告均达到当时使用的
+`0.90×` 参考值。当前合入评审保留逐例结果，不以该值阻断。[C++ 卡 0](cpp-0.csv) · [C++ 卡 1](cpp-1.csv) ·
 [Python 卡 0](python-0.json) · [Python 卡 1](python-1.json)
 
 ## 环境

@@ -60,21 +60,20 @@ plugin reports the compile target (`cuda:90:32`), so the compiler imports no
 framework and needs no GPU. The protocol is one JSON object per line; it is
 documented in `compiler/flagcv_codegen/main.py`.
 
-**Cache key.** Kernel name, each image's depth, channel count and whether its
-base pointer is 16-byte aligned, compile-time param values, runtime param
-types, the device, and the compiler identity (a digest of the interpreter,
-Triton compiler key, provider and every registered kernel source). Image sizes and
-strides are runtime params, so a new size reuses the kernel. A runtime param
-the lowering marks with `add_hinted_param` is also specialised on
-divisibility by 16, as Triton's own JIT does, so row accesses can vectorise.
+**Loaded modules.** Each Handle owns a cache in the context of its bound
+device. It matches the kernel name and operand/parameter signature, including
+depth, channels, 16-byte base alignment, constexpr values and runtime argument
+types. Runtime image sizes and strides can reuse a module when their types
+and any `add_hinted_param` divisibility classes match. The Runtime queries
+compiler identity once per backend per process. Restart the process after
+changing registered kernels, providers or compiler settings.
 
 **Files.** Compiled binaries go to `$FLAGCV_CACHE_DIR/artifacts/<hash>/`
-(default `~/.cache/flagcv`); Triton's own cache (`~/.triton/cache`) holds the
-intermediate IR. Loaded modules and launch metadata live per `Handle`. Artifact identity uses
-Triton's target, compiler, option and signature key. Therefore
-a new host process restarts the compiler process. Triton can reuse cached
-compilation artifacts, but the compiler process must start and import Triton
-again.
+(default `~/.cache/flagcv`), keyed by Triton's compiled artifact hash.
+The hash reflects target, compiler, options and signature. Triton's own cache
+(`~/.triton/cache`) holds intermediate IR. A new process starts a new compiler
+process and may reuse Triton artifacts. Each Handle still loads its own device
+modules and releases them before the context.
 
 **Locations and overrides.** `FLAGCV_PYTHON` selects the interpreter for the
 compiler process (default `python3`). Kernels, the compiler and platform

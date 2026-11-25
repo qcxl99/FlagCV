@@ -7,6 +7,21 @@ NVIDIA Toolkit 和 GPU、上游 Triton、PyTorch、pytest，以及含 `core` 和
 包含 OpenCV core/contrib 提交、GPU 型号和 PCI ID、驱动、工具链、Triton 版本、
 样本数与本轮源码提交。
 
+## 一次运行的验收入口
+
+`python tools/check_merge.py --profile nvidia --opencv-dir "$OPENCV_CMAKE_DIR"
+--output /path/to/new-nvidia-evidence` 运行一张卡的 NVIDIA 验收。用物理 GPU UUID
+设置 `CUDA_VISIBLE_DEVICES`。在共享机器上优先由 KernelForge 的
+`flagcv-acceptance` 入口检查空闲并锁卡。结果目录含每步命令与退出码、测试报告、
+迁移后的安装包加载记录、原始性能数据和环境日志。另跑 host profile 和适用的
+跨设备生命周期用例。下面保留逐步复跑方式，方便定位问题。
+
+NVIDIA 合入默认使用 Python 100 ms 预热、100 ms 测量和两轮配对。
+需要原有 1000 ms、三轮口径时，在合入命令加
+`--python-benchmark-profile long`，该参数也可传给 KernelForge。
+直接跑 pytest 时用 `--benchmark-profile long`。用检查器读取 long
+报告时传 `--python-benchmark-profile long`。两个协议的基线分别保存。
+
 ## 复跑
 
 在 FlagCV 根目录执行。替换 `OPENCV_CMAKE_DIR`，使它指向含
@@ -49,9 +64,12 @@ for device in 0 1; do
 done
 ```
 
-已交付路径的回归比较可向 checker 再传 `--previous-cpp` 和
-`--previous-python`，使用同机、同设备、同模式的主分支报告。冻结新基线时按
-[合入标准](../CONTRIBUTING.md) 逐例审查。
+合入入口生成 `performance-identity.json` 和 `performance-summary.json`。
+检查器按 [冻结用例清单](../benchmark/nvidia_cases.json) 验收完整参数，核对
+样本与中位数。主分支比较需要同协议的两个报告及身份文件，可加
+`--identity`、`--previous-identity`、`--previous-cpp` 和 `--previous-python`。
+设备、OpenCV CUDA 实际链接库、工具链和协议须匹配，两个候选的源码身份分别留存。
+不匹配时报告原因，保留本次逐例报告。比值用于评审，固定阈值不阻断合入。
 
 ## 用例和计时
 
@@ -61,17 +79,27 @@ done
   grid Y 上限的高窄图像也由公开 API 测试。
 - 注册失败测试给 NVIDIA 注册一个缺失的 kernel symbol。调用应报编译错误、
   保留目标字节，同一个 Handle 随后可执行未被平台注册的公版算子。
-- C++ 逐例性能为 112 个共同 workload，包括 64×64、61×67、VGA、1080p、4K
-  和多通道 ROI。每例比较同一非默认流上的预分配缓冲区，成功通过 OpenCV CPU
-  校验、输入与边界检查后再计时。交替测量两实现，报告每次 batch 的 CUDA event
-  平均耗时的样本中位数，以及调用提交的主机时间中位数。流时间包含提交造成的空隙，
-  适用于 API 端到端评价。首次编译、分配、上传和下载在计时区外。
-- Python 性能包含 92 个单通道 workload。用 FlagGems 兼容 JSON 字段保存 paired
-  样本和中位数。使用 Triton event 计时，数据在测试前上传。Python 和 C++ 的
-  计时路径与所涵盖布局分别记录。
-- 16U 乘法共同测速范围以及全域 CPU 验收见 [数值验收](numerical-tolerance.md)。
+- C++ 性能覆盖 112 个共同 workload。使用 OpenCV perf 同用的
+  `cv::getTickCount()`，对同一非默认流上的公开调用与等待计时。`host_single_us`
+  每次调用单独等待，`host_batch_us` 在一批调用后等待并除以调用次数。
+  预分配输入输出，先校验语义和边界，预热后交替测两实现。保留两项原始配对
+  样本，汇总样本数、最小值、中位数、均值、总体标准差和几何均值。未执行
+  OpenCV 的 `TEST_CYCLE` runner 或其异常值过滤。原有 Event 和提交时间列维持，
+  各有独立时间边界。首次编译、分配、上传和下载均在计时区外。
+- Python 92 个单通道 workload 使用 Triton `do_bench`，100 ms 测量
+  并显式 `return_mode="median"`。默认 100 ms 预热、交替测两轮并取
+  平均。long 用 1000 ms 预热、三轮中位数，对齐 FlagGems kernel 的
+  预热与单轮统计。两种口径均以同卡 OpenCV CUDA 对照，JSON 保留
+  配对样本与协议。Python 与 C++ 分别报告。
+- 正确性另含 Python/C++ 共享整数向量、第二输入别名、全零与全满掩码、实际
+  NVIDIA U8 tile 边界两侧的 packed 和 pitched 路径。不同线程各用一个 Handle
+  和 stream 并验证释放隔离。Host CTest 用测试专用 backend 记录实际 Runtime 调用，
+  验证编译、加载、缓存和释放顺序。安装包示例从迁移目录执行 add、bitwise_not 和 flip。
+- 16U 乘法共同测速范围、`1×1 U16C1` 参考例外和确定性回归见 [数值验收](numerical-tolerance.md)。
 
 ## 已记录的 NVIDIA 基线
 
-本轮两个 H20 设备的工具链、逐例 CSV/JSON 和各算子最慢比值见
+原协议下两个 H20 设备的工具链、逐例 CSV/JSON 和各算子最慢比值见
 [2026-11-25 H20 基线](baselines/nvidia-h20-2026-11-25/README.md)。
+
+仓内旧版归档用于复盘，缺少当前协议字段。较新的 1000 ms／三轮证据可在 long 模式下按原身份校验。与默认协议做主分支对比时，用默认协议重测目标基线。

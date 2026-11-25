@@ -8,6 +8,7 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 #include <iostream>
 #include <vector>
 
@@ -88,6 +89,26 @@ Timing measure(Function function, cudaStream_t stream, int repetitions) {
   return {1000 * start.elapsed(end) / repetitions,
           std::chrono::duration<double, std::micro>(host_end - host_start).count() /
               repetitions};
+}
+
+// OpenCV perf uses cv::getTickCount. Drain only the tested stream inside
+// the measured interval so the public async call's result is ready at the end.
+template <typename Function>
+double synchronized_us(Function function, const Stream& stream, int repetitions) {
+  const auto start = cv::getTickCount();
+  for (int i = 0; i < repetitions; ++i) function();
+  stream.wait();
+  return (cv::getTickCount() - start) * 1e6 / cv::getTickFrequency() / repetitions;
+}
+
+std::string sample_field(const std::vector<double>& samples) {
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(5);
+  for (std::size_t i = 0; i < samples.size(); ++i) {
+    if (i) out << ';';
+    out << samples[i];
+  }
+  return out.str();
 }
 
 double median(std::vector<double> values) {
@@ -171,14 +192,23 @@ void benchmark(Op op, const Case& test, flagcv::Handle& handle, const Stream& st
   stream.wait();
   const int iterations = std::clamp(16000000 / (test.height * test.width), 20, 200);
   std::vector<double> cand_stream, cv_stream, cand_host, cv_host;
+  std::vector<double> cand_single, cv_single, cand_batch, cv_batch;
   for (int sample = 0; sample < samples; ++sample) {
     Timing cand_time{}, cv_time{};
     if (sample % 2 == 0) {
       cand_time = measure(candidate, stream.value, iterations);
       cv_time = measure(native, stream.value, iterations);
+      cand_single.push_back(synchronized_us(candidate, stream, 1));
+      cv_single.push_back(synchronized_us(native, stream, 1));
+      cand_batch.push_back(synchronized_us(candidate, stream, iterations));
+      cv_batch.push_back(synchronized_us(native, stream, iterations));
     } else {
       cv_time = measure(native, stream.value, iterations);
       cand_time = measure(candidate, stream.value, iterations);
+      cv_single.push_back(synchronized_us(native, stream, 1));
+      cand_single.push_back(synchronized_us(candidate, stream, 1));
+      cv_batch.push_back(synchronized_us(native, stream, iterations));
+      cand_batch.push_back(synchronized_us(candidate, stream, iterations));
     }
     cand_stream.push_back(cand_time.stream_us);
     cv_stream.push_back(cv_time.stream_us);
@@ -193,7 +223,10 @@ void benchmark(Op op, const Case& test, flagcv::Handle& handle, const Stream& st
       << cand << ',' << base << ',' << base / cand << ','
       << median(cand_host) << ',' << median(cv_host) << ",true,"
       << (op == Op::multiply && test.depth == CV_16U ? "u16_product_in_i32" : "default")
-      << '\n';
+      << ',' << median(cand_single) << ',' << median(cv_single)
+      << ',' << median(cand_batch) << ',' << median(cv_batch)
+      << ',' << sample_field(cand_single) << ',' << sample_field(cv_single)
+      << ',' << sample_field(cand_batch) << ',' << sample_field(cv_batch) << '\n';
   out.flush();
 }
 }  // namespace
@@ -220,10 +253,14 @@ int main(int argc, char** argv) {
     require(static_cast<bool>(out), "cannot open benchmark output");
     out << "# device=" << properties.name << ",ordinal=" << device
         << ",pci_bus=" << pci_bus << ",driver_api=" << driver
-        << ",cuda_runtime=" << runtime << ",opencv=" << CV_VERSION << '\n'
+        << ",cuda_runtime=" << runtime << ",opencv=" << CV_VERSION
+        << ",protocol=flagcv-cpp-opencv-ticks-stream-wait/2" << '\n'
         << "op,height,width,depth,channels,layout,flip_code,samples,iterations,"
            "flagcv_stream_us,opencv_stream_us,speedup,flagcv_submit_us,opencv_submit_us,"
-           "validated_against_opencv_cpu,input_domain\n"
+           "validated_against_opencv_cpu,input_domain,"
+           "flagcv_host_single_us,opencv_host_single_us,flagcv_host_batch_us,opencv_host_batch_us,"
+           "flagcv_host_single_samples_us,opencv_host_single_samples_us,"
+           "flagcv_host_batch_samples_us,opencv_host_batch_samples_us\n"
         << std::fixed << std::setprecision(5);
     flagcv::Handle handle("nvidia", device);
     Stream stream;

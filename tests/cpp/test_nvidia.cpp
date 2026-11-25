@@ -3,10 +3,15 @@
 
 #include "cuda_image.hpp"
 
+#include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <chrono>
 #include <limits>
 #include <iostream>
+#include <fstream>
+#include <future>
+#include <sstream>
 #include <memory>
 #include <vector>
 #include <thread>
@@ -52,17 +57,22 @@ void check_guards(const Image& dst, cv::Mat received, const cv::Mat& mask) {
   }
 }
 
+enum class Mask { none, mixed, zero, full };
+enum class Alias { none, lhs, rhs };
+
 void check_case(flagcv::Handle& handle, Op op, int depth, int channels, int rows,
-                int cols, bool masked, bool in_place, bool custom, int code,
-                double scale = 1.0) {
+                int cols, Mask mask_pattern, Alias alias, bool custom, int code,
+                double scale = 1.0, bool packed = false) {
   try {
     Stream stream(custom);
     const int type = CV_MAKETYPE(depth, channels);
-    Image a(rows, cols, type, 1, 1, 13);
-    Image b(rows, cols, type, 2, 1, 7);
-    Image output(rows, cols, type, 3, 2, 29);
+    const int offset = packed ? 0 : 1;
+    Image a(rows, cols, type, offset, offset, 13 * offset);
+    Image b(rows, cols, type, 2 * offset, offset, 7 * offset);
+    Image output(rows, cols, type, 3 * offset, 2 * offset, 29 * offset);
     Image mask(rows, cols, CV_8U, 1, 3, 6);
-    Image& dst = in_place ? a : output;
+    Image& dst = alias == Alias::lhs ? a : alias == Alias::rhs ? b : output;
+    const bool masked = mask_pattern != Mask::none;
     cv::RNG rng(0x317f);
     fill_bytes(a.host, rng);
     fill_bytes(b.host, rng);
@@ -72,15 +82,19 @@ void check_case(flagcv::Handle& handle, Op op, int depth, int channels, int rows
     fill_bytes(output.host, rng);
     auto mask_pixels = masked ? mask.pixels() : cv::Mat();
     if (masked) {
-      rng.fill(mask_pixels, cv::RNG::UNIFORM, 0, 4);
-      mask_pixels.ptr()[0] = 0;
-      if (cols > 1) mask_pixels.ptr()[1] = 255;
+      if (mask_pattern == Mask::mixed) {
+        rng.fill(mask_pixels, cv::RNG::UNIFORM, 0, 4);
+        mask_pixels.ptr()[0] = 0;
+        if (cols > 1) mask_pixels.ptr()[1] = 255;
+      } else {
+        mask_pixels.setTo(mask_pattern == Mask::full ? 255 : 0);
+      }
       mask.upload(stream.value);
     }
     auto expected = dst.pixels().clone();
     reference(op, a.pixels(), b.pixels(), expected, code, mask_pixels, scale);
     // Poison each destination region outside exact aliasing and mask constraints.
-    if (!in_place) {
+    if (alias == Alias::none) {
       auto pixels = dst.pixels();
       const auto bytes = pixels.elemSize();
       for (int y = 0; y < rows; ++y) {
@@ -99,20 +113,21 @@ void check_case(flagcv::Handle& handle, Op op, int depth, int channels, int rows
     }
     a.upload(stream.value);
     if (!unary(op)) b.upload(stream.value);
-    if (!in_place) dst.upload(stream.value);
+    if (alias == Alias::none) dst.upload(stream.value);
     call(op, handle, a.view(), b.view(), dst.view(), stream.value, code,
          masked ? mask.view() : flagcv::GpuMat{}, scale);
     auto received = dst.download(stream);
     compare(op, received(dst.roi), expected);
     check_guards(dst, received, mask_pixels);
-    if (!in_place) require(bytes_equal(a.host, a.download(stream)), "source A changed");
-    if (!unary(op)) require(bytes_equal(b.host, b.download(stream)), "source B changed");
+    if (alias != Alias::lhs) require(bytes_equal(a.host, a.download(stream)), "source A changed");
+    if (!unary(op) && alias != Alias::rhs)
+      require(bytes_equal(b.host, b.download(stream)), "source B changed");
     if (masked) require(bytes_equal(mask.host, mask.download(stream)), "mask changed");
   } catch (const std::exception& error) {
     throw std::runtime_error(std::string(name(op)) + " depth=" + std::to_string(depth) +
                              " channels=" + std::to_string(channels) +
-                             " mask=" + std::to_string(masked) +
-                             " alias=" + std::to_string(in_place) + ": " + error.what());
+                             " mask=" + std::to_string(static_cast<int>(mask_pattern)) +
+                             " alias=" + std::to_string(static_cast<int>(alias)) + ": " + error.what());
   }
 }
 
@@ -215,7 +230,77 @@ void stream_is_asynchronous(flagcv::Handle& handle) {
   require(result.ptr()[0] == static_cast<unsigned char>(~31), "wrong stream result");
 }
 
+void multiply_u16_saturation(flagcv::Handle& handle) {
+  const std::uint16_t left[] = {65535, 32768, 65535, 65535, 257, 256, 0, 42};
+  const std::uint16_t right[] = {65535, 2, 1, 0, 255, 255, 65535, 100};
+  const std::uint16_t expected[] = {65535, 65535, 65535, 0, 65535, 65280, 0, 4200};
+  Stream stream;
+  for (int width : {1, 8}) {
+    Image a(1, width, CV_16UC1), b(1, width, CV_16UC1), dst(1, width, CV_16UC1);
+    std::copy_n(left, width, a.host.ptr<std::uint16_t>());
+    std::copy_n(right, width, b.host.ptr<std::uint16_t>());
+    cv::Mat reference_output;
+    reference(Op::multiply, a.host, b.host, reference_output);
+    require(std::equal(expected, expected + width, reference_output.ptr<std::uint16_t>()),
+            "U16C1 multiply reference must saturate for width " + std::to_string(width));
+
+    a.upload(stream.value);
+    b.upload(stream.value);
+    flagcv::multiply(handle, a.view(), b.view(), dst.view(), stream.value);
+    const auto actual = dst.download(stream);
+    compare(Op::multiply, actual, reference_output);
+  }
+  std::cout << "U16C1 multiply saturation passed for 1x1 and 1x8\n";
+}
+
+constexpr std::array vector_ops{Op::add, Op::subtract, Op::multiply,
+                               Op::bitwise_and, Op::bitwise_not, Op::flip};
+
+void shared_semantic_vectors(flagcv::Handle& handle) {
+  std::ifstream file(FLAGCV_TEST_DATA "/semantic_u8.csv");
+  std::string row;
+  require(static_cast<bool>(std::getline(file, row)), "missing shared semantics vectors");
+  std::vector<std::array<int, 8>> vectors;
+  while (std::getline(file, row)) {
+    std::replace(row.begin(), row.end(), ',', ' ');
+    std::istringstream fields(row);
+    std::array<int, 8> values{};
+    for (auto& value : values)
+      require(static_cast<bool>(fields >> value), "invalid shared semantics vector");
+    vectors.push_back(values);
+  }
+  const int cols = static_cast<int>(vectors.size());
+  require(cols > 0, "empty shared semantics vectors");
+  Stream stream;
+  Image a(1, cols, CV_8U), b(1, cols, CV_8U), dst(1, cols, CV_8U);
+  for (int col = 0; col < cols; ++col) {
+    a.host.at<unsigned char>(0, col) = vectors[col][0];
+    b.host.at<unsigned char>(0, col) = vectors[col][1];
+  }
+  a.upload(stream.value);
+  b.upload(stream.value);
+  for (std::size_t op = 0; op < vector_ops.size(); ++op) {
+    call(vector_ops[op], handle, a.view(), b.view(), dst.view(), stream.value, 1);
+    const auto actual = dst.download(stream);
+    for (int col = 0; col < cols; ++col)
+      require(actual.at<unsigned char>(0, col) == vectors[col][op + 2],
+              std::string(name(vector_ops[op])) + " differs from shared integer vector");
+  }
+}
+
 void cases(flagcv::Handle& handle) {
+  multiply_u16_saturation(handle);
+  shared_semantic_vectors(handle);
+  // NVIDIA U8 BLOCK_X is 1024 for both pointwise and flip. Cross the tail
+  // boundary in their packed and independently pitched paths.
+  for (int width : {1023, 1024, 1025}) {
+    for (bool packed : {false, true}) {
+      check_case(handle, Op::add, CV_8U, 1, 3, width, Mask::none, Alias::none, true, 0,
+                 1.0, packed);
+      check_case(handle, Op::flip, CV_8U, 1, 3, width, Mask::none, Alias::none, false, 1,
+                 1.0, packed);
+    }
+  }
   constexpr int all_depths[] = {CV_8U, CV_8S, CV_16U, CV_16S,
                                 CV_32S, CV_16F, CV_32F, CV_64F};
   for (const auto op : operators) {
@@ -223,22 +308,30 @@ void cases(flagcv::Handle& handle) {
       if (arithmetic(op) && depth != CV_8U && depth != CV_16U &&
           depth != CV_16F && depth != CV_32F) continue;
       for (int channels : {1, 2, 3, 4}) {
-        const bool mask = supports_mask(op) && channels >= 2;
-        check_case(handle, op, depth, channels, 17, 67, mask, false,
+        const auto mask = supports_mask(op) && channels >= 2 ? Mask::mixed : Mask::none;
+        check_case(handle, op, depth, channels, 17, 67, mask, Alias::none,
                    channels != 1, channels - 2);
       }
     }
-    check_case(handle, op, CV_8U, 3, 19, 173, supports_mask(op), true, true, -2);
+    check_case(handle, op, CV_8U, 3, 19, 173,
+               supports_mask(op) ? Mask::mixed : Mask::none, Alias::lhs, true, -2);
+    if (!unary(op))
+      check_case(handle, op, CV_16U, 1, 5, 33,
+                 supports_mask(op) ? Mask::mixed : Mask::none, Alias::rhs, false, 0);
+    if (supports_mask(op)) {
+      check_case(handle, op, CV_8U, 1, 3, 33, Mask::zero, Alias::none, true, 0);
+      check_case(handle, op, CV_8U, 3, 3, 33, Mask::full, Alias::lhs, false, 0);
+    }
   }
   for (int code : {-7, 0, 9}) {
-    check_case(handle, Op::flip, CV_8U, 3, 1, 19, false, true, true, code);
-    check_case(handle, Op::flip, CV_8U, 3, 19, 1, false, false, false, code);
+    check_case(handle, Op::flip, CV_8U, 3, 1, 19, Mask::none, Alias::lhs, true, code);
+    check_case(handle, Op::flip, CV_8U, 3, 19, 1, Mask::none, Alias::none, false, code);
   }
-  check_case(handle, Op::flip, CV_64F, 4, 1, 1, false, true, false, -2);
-  check_case(handle, Op::multiply, CV_32F, 1, 19, 67, false, false, true, -0.25);
-  check_case(handle, Op::multiply, CV_32F, 1, 17, 67, false, false, true, 0.75);
+  check_case(handle, Op::flip, CV_64F, 4, 1, 1, Mask::none, Alias::lhs, false, -2);
+  check_case(handle, Op::multiply, CV_32F, 1, 19, 67, Mask::none, Alias::none, true, -0.25);
+  check_case(handle, Op::multiply, CV_32F, 1, 17, 67, Mask::none, Alias::none, true, 0.75);
   // The NVIDIA launch folds rows into grid Z when CUDA's Y limit is reached.
-  check_case(handle, Op::flip, CV_8U, 3, 65539, 1, false, false, true, -1);
+  check_case(handle, Op::flip, CV_8U, 3, 65539, 1, Mask::none, Alias::none, true, -1);
   validation(handle);
   shared_storage(handle);
   stream_is_asynchronous(handle);
@@ -264,6 +357,29 @@ void platform_failure() {
   flagcv::bitwise_not(handle, src.view(), dst.view(), stream.value);
   require(dst.download(stream).ptr()[0] == static_cast<unsigned char>(~13),
           "unregistered operator failed to select the common implementation");
+}
+
+void independent_handles(int device) {
+  auto exercise = [device](flagcv::Handle& handle, unsigned char pixel) {
+    cuda_check(cudaSetDevice(device));
+    Stream stream;
+    Image src(5, 32, CV_8U), dst(5, 32, CV_8U);
+    src.host.setTo(pixel);
+    src.upload(stream.value);
+    flagcv::bitwise_not(handle, src.view(), dst.view(), stream.value);
+    const auto output = dst.download(stream);
+    require(cv::countNonZero(output != static_cast<unsigned char>(~pixel)) == 0,
+            "concurrent handle returned the wrong output");
+  };
+  flagcv::Handle survivor("nvidia", device);
+  auto first = std::async(std::launch::async, [&] {
+    flagcv::Handle transient("nvidia", device);
+    exercise(transient, 13);
+  });
+  auto second = std::async(std::launch::async, [&] { exercise(survivor, 42); });
+  first.get();
+  second.get();
+  exercise(survivor, 77);
 }
 
 void across_devices(int device_count) {
@@ -305,6 +421,7 @@ int main(int argc, char** argv) {
       cuda_check(cudaSetDevice(device));
       flagcv::Handle handle("nvidia", device);
       cases(handle);
+      independent_handles(device);
       std::cout << "NVIDIA device " << device << " passed public API matrix\n";
     }
     across_devices(requested);

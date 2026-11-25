@@ -8,6 +8,27 @@ flagcv_enable_warnings(flagcv_test_registry)
 add_test(NAME flagcv.registry COMMAND flagcv_test_registry)
 set_tests_properties(flagcv.registry PROPERTIES LABELS "host")
 
+add_library(flagcv_testfixture MODULE cpp/runtime_test_backend.cpp)
+target_include_directories(flagcv_testfixture PRIVATE "${PROJECT_SOURCE_DIR}")
+target_compile_features(flagcv_testfixture PRIVATE cxx_std_17)
+flagcv_enable_warnings(flagcv_testfixture)
+add_executable(flagcv_test_runtime cpp/test_runtime.cpp)
+target_link_libraries(flagcv_test_runtime PRIVATE flagcv)
+target_compile_features(flagcv_test_runtime PRIVATE cxx_std_17)
+flagcv_enable_warnings(flagcv_test_runtime)
+
+set(fixture "${CMAKE_CURRENT_BINARY_DIR}/runtime-fixture")
+file(MAKE_DIRECTORY "${fixture}/backends/testfixture/kernels")
+file(CREATE_LINK "${PROJECT_SOURCE_DIR}/compiler" "${fixture}/compiler" SYMBOLIC)
+file(CREATE_LINK "${PROJECT_SOURCE_DIR}/kernels" "${fixture}/kernels" SYMBOLIC)
+configure_file(runtime/compiler.py "${fixture}/backends/testfixture/compiler.py" COPYONLY)
+file(WRITE "${fixture}/backends/testfixture/kernels/registry.json" [=[
+{"kernels":[{"name":"add","source":"../../../kernels/common/pointwise.py","function":"platform_add"}]}
+]=])
+add_test(NAME flagcv.runtime COMMAND flagcv_test_runtime "${fixture}")
+set_tests_properties(flagcv.runtime PROPERTIES LABELS "host" TIMEOUT 60
+  ENVIRONMENT "FLAGCV_PLUGIN_DIR=$<TARGET_FILE_DIR:flagcv_testfixture>;FLAGCV_DATA_DIR=${fixture}")
+
 option(FLAGCV_TEST_NVIDIA "Run public C++ API tests with NVIDIA and OpenCV CPU" OFF)
 set(FLAGCV_TEST_NVIDIA_DEVICES "1" CACHE STRING "Number of visible NVIDIA test devices")
 
@@ -35,6 +56,7 @@ if(FLAGCV_TEST_NVIDIA)
   target_link_libraries(flagcv_test_nvidia PRIVATE flagcv opencv_core
     CUDA::cudart Threads::Threads)
   target_compile_features(flagcv_test_nvidia PRIVATE cxx_std_17)
+  target_compile_definitions(flagcv_test_nvidia PRIVATE FLAGCV_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
   flagcv_enable_warnings(flagcv_test_nvidia)
   add_test(NAME flagcv.nvidia.public_api
     COMMAND flagcv_test_nvidia "${FLAGCV_TEST_NVIDIA_DEVICES}")
