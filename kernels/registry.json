@@ -157,6 +157,11 @@
       "function": "gaussian_direct"
     },
     {
+      "name": "gaussian_f32_local",
+      "source": "common/spatial_filters.py",
+      "function": "gaussian_f32_local"
+    },
+    {
       "name": "gaussian_horizontal",
       "source": "common/spatial_filters.py",
       "function": "gaussian_horizontal"

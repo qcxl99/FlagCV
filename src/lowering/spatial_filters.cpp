@@ -81,11 +81,18 @@ LoweredOp lower_gaussian(const GpuMat& src, const GpuMat& dst,
   const auto& data = SpatialFilterAccess::get(plan);
   if (src.width() != data.source.width || src.height() != data.source.height)
     throw std::invalid_argument("GaussianBlur source extents differ from plan");
-  auto op = prepare("gaussian_direct", src, dst, data.depth, data.depth, workspace, plan.table().bytes);
+  const bool local_f32 = data.depth == Depth::k32F && (src.channels() == 3 || src.channels() == 4) &&
+                         data.kernel.width == data.kernel.height &&
+                         (data.kernel.width == 7 || data.kernel.width == 15) &&
+                         src.width() >= 1280 && src.width() <= 3840 &&
+                         src.height() >= 720 && src.height() <= 2160;
+  auto op = prepare(local_f32 ? "gaussian_f32_local" : "gaussian_direct",
+                    src, dst, data.depth, data.depth, workspace, plan.table().bytes);
   op.add_param("kernel_width", data.kernel.width);
   op.add_param("kernel_height", data.kernel.height);
   common_constants(op, src.channels(), data.border, data.depth == Depth::k64F);
   op.add_constexpr("FIXED_BITS", data.depth == Depth::k8U ? 8 : data.depth == Depth::k16U ? 16 : 0);
+  if (local_f32) op.add_constexpr("TAPS", data.kernel.width);
   return op;
 }
 
