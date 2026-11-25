@@ -120,3 +120,10 @@ python "$PREFIX/share/flagcv/benchmark/check_nvidia.py" \
 原生拒绝、语义差异、候选与 CPU 差异和缺项分别记录。自动阈值设备
 结果与同步主机返回的计时单列。档案入口复核历史数据。
 实时 NVIDIA 六项沿用原命令。合并检查可用同名选项附加归档复核。
+
+归档默认仅生成报告，其中包含独立 CPU 状态、原生 CUDA 状态和作业身份。
+通过 `--require-imgproc-scope` 可指定要核对的历史分组。
+拒绝或语义差异可保留候选记录；必需 ID 缺失、身份不足或候选 CPU
+失败会使该分组检查失败。全组为 `all`，可用 `geometry-large`
+等更窄的分组。合并检查使用 `--imgproc-evidence` 时同时指定
+`--imgproc-scope`。该检查只证明历史分组达到其验证条件。

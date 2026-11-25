@@ -197,24 +197,34 @@ def main():
     parser.add_argument("--python", type=Path)
     parser.add_argument("--identity", type=Path)
     parser.add_argument("--imgproc-evidence", type=Path, help="root of the archived H20 runs")
+    parser.add_argument("--require-imgproc-scope", action="append",
+                        choices=("all", "first-batch", "geometry-small", "geometry-large", "arithmetic-filters"))
     parser.add_argument("--python-benchmark-profile", choices=tuple(PROFILES), default="default")
     parser.add_argument("--previous-cpp", type=Path)
     parser.add_argument("--previous-python", type=Path)
     parser.add_argument("--previous-identity", type=Path)
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args()
+    if args.require_imgproc_scope and not args.imgproc_evidence:
+        parser.error("--require-imgproc-scope needs --imgproc-evidence")
     if args.imgproc_evidence is not None:
         if any((args.cpp, args.python, args.identity, args.previous_cpp,
                 args.previous_python, args.previous_identity)):
             parser.error("Imgproc archive intake uses its own evidence, without live comparison arguments")
-        from imgproc_archive import load_archive
+        from imgproc_archive import load_archive, qualify_archive
         try:
             report = load_archive(args.imgproc_evidence)
+            if args.require_imgproc_scope:
+                report["scope_check"] = qualify_archive(report, args.require_imgproc_scope)
         except (OSError, ValueError, KeyError, TypeError) as error:
             parser.error(str(error))
         print(json.dumps(report["counts"], indent=2))
+        if "scope_check" in report:
+            print(json.dumps(report["scope_check"], indent=2))
         if args.summary:
             args.summary.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        if report.get("scope_check", {}).get("status") == "FAIL":
+            raise SystemExit(1)
         return
     if not args.cpp or not args.python:
         parser.error("--cpp and --python are required for the live NVIDIA checker")

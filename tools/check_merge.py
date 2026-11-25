@@ -62,6 +62,7 @@ class Validation:
         self.python_benchmark_profile = args.python_benchmark_profile
         self.opencv = args.opencv_dir.resolve() if args.opencv_dir else None
         self.imgproc_evidence = args.imgproc_evidence.resolve() if args.imgproc_evidence else None
+        self.imgproc_scope = args.imgproc_scope
         self.build = self.output / "build"
         self.python = sys.executable
         self.env = {key: value for key, value in os.environ.items()
@@ -189,9 +190,11 @@ class Validation:
             self.performance()
         if self.imgproc_evidence:
             summary = self.output / "imgproc-archive-summary.json"
-            self.run("check-imgproc-archive", self.python, SOURCE / "benchmark/check_nvidia.py",
-                     "--imgproc-evidence", self.imgproc_evidence, "--summary", summary)
             self.report["artifacts"].append(summary.name)
+            scopes = [arg for scope in self.imgproc_scope for arg in ("--require-imgproc-scope", scope)]
+            self.run("check-imgproc-archive", self.python, SOURCE / "benchmark/check_nvidia.py",
+                     "--imgproc-evidence", self.imgproc_evidence, "--summary", summary, *scopes)
+            self.report["imgproc_archive"] = {"scope": "historical", "groups": self.imgproc_scope}
 
     def opencv_libraries(self, name, binary, env):
         log = self.run(name, "ldd", binary, env=env)
@@ -274,9 +277,13 @@ def main():
     parser.add_argument("--profile", choices=("host", "nvidia"), required=True)
     parser.add_argument("--output", type=Path, required=True, help="a new evidence directory")
     parser.add_argument("--imgproc-evidence", type=Path, help="root of the archived H20 runs")
+    parser.add_argument("--imgproc-scope", action="append",
+                        choices=("all", "first-batch", "geometry-small", "geometry-large", "arithmetic-filters"))
     parser.add_argument("--opencv-dir", type=Path, help="OpenCV CMake package directory for NVIDIA")
     parser.add_argument("--python-benchmark-profile", choices=tuple(PROFILES), default="default")
     args = parser.parse_args()
+    if bool(args.imgproc_evidence) != bool(args.imgproc_scope):
+        parser.error("--imgproc-evidence and --imgproc-scope must be used together")
     if args.profile == "host" and args.python_benchmark_profile != "default":
         parser.error("--python-benchmark-profile applies to NVIDIA")
     if (args.profile == "nvidia") != bool(args.opencv_dir):

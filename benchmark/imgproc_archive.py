@@ -70,7 +70,7 @@ def normalize(raw_class, ratios, relative, source, background=None, record=None)
     return result
 
 
-def read_first_batch(payload, relative):
+def read_first_batch(payload, relative, restored_python):
     entries = {side: {} for side in ENTRIES}
     if payload is None:
         return entries
@@ -80,8 +80,11 @@ def read_first_batch(payload, relative):
             if record is None:
                 continue
             metrics = {"event": record["ratio"]} if record.get("ratio") is not None else {}
+            source = row.get(f"{side}_measurement_source")
+            if side == "python" and source is None:
+                source = restored_python.get(row["id"])
             add_row(target, row["id"], normalize(
-                record["class"], metrics, relative, row.get(f"{side}_measurement_source"),
+                record["class"], metrics, relative, source,
                 list(record.get("candidate_only", {}).get("candidate_samples_us",
                                                          record.get("candidate_only", {}))), record))
     return entries
@@ -125,7 +128,9 @@ def read_cpp_group(group_id, payload):
 def read_group(group, payloads):
     if "shared" in group:
         path = group["shared"]
-        return read_first_batch(payloads[path], path)
+        identity_path = group["source_identity"]
+        sources = group["restored_python_sources"] if payloads[identity_path] is not None else {}
+        return read_first_batch(payloads[path], path, sources)
 
     entries = {side: {} for side in ENTRIES}
     cpp = group["cpp"]
@@ -189,8 +194,13 @@ def load_archive(root):
                 observation = rows[side].get(case, {"classification": "missing", "formal_ratios": None,
                                                      "cpu_reference": {"status": "missing"},
                                                      "opencv_cuda": {"status": "missing"}})
-                if missing[side] and observation["classification"] != "missing":
+                observed = observation["classification"] != "missing"
+                identity_verified = observed and not missing[side] and bool(observation.get("source"))
+                observation["identity_status"] = ("verified" if identity_verified else
+                                                  "unverified" if observed else "missing")
+                if observed and not identity_verified:
                     observation["missing_original_evidence"] = missing[side]
+                    observation["historical_ratios"] = observation["formal_ratios"]
                     observation["formal_ratios"] = None
                 counts[side][observation["classification"]] += 1
                 results.append(dict(case=case, group=group["id"], operator=item["operator"],
@@ -200,3 +210,25 @@ def load_archive(root):
                 manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
                 archived_inputs={group["id"]:group["files"] for group in manifest["groups"]},
                 original_jobs=original_jobs, counts=counts, rows=results)
+
+
+def qualify_archive(report, groups):
+    """Check completeness and identity of a declared historical scope."""
+    selected = set(groups)
+    available = {row["group"] for row in report["rows"]}
+    if "all" in selected:
+        selected = available
+    if not selected or not selected <= available:
+        raise ValueError("unknown or empty Imgproc archive scope")
+    outcomes = defaultdict(int)
+    for row in report["rows"]:
+        if row["group"] not in selected:
+            continue
+        if row["classification"] == "missing":
+            outcomes["missing"] += 1
+        elif row["identity_status"] != "verified":
+            outcomes["identity_unverified"] += 1
+        elif row["cpu_reference"]["status"] != "pass":
+            outcomes["candidate_cpu_failed"] += 1
+    return dict(groups=sorted(selected), status="FAIL" if outcomes else "PASS",
+                evidence_scope="historical", failures=dict(outcomes))
