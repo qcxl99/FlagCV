@@ -78,7 +78,7 @@ def threshold_call(src, dst, cutoff, maxval, mode, dtype, work=None, auto=None, 
             threshold_histogram[grid](src, work, rows, row_values, src.stride(0), BLOCK=BLOCK)
             threshold_select[(1,)](work, rows * row_values, BINS=bins,
                                    TRIANGLE=auto == cv2.THRESH_TRIANGLE, num_warps=1,
-                                   enable_fp_fusion=False)
+                                   num_stages=1, enable_fp_fusion=False)
         if not dry:
             threshold_apply[grid](src, dst, src if work is None else work, rows, row_values,
                                   src.stride(0), dst.stride(0), *scalars,
