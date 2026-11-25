@@ -26,6 +26,9 @@ ZERO = SimpleNamespace(name="sample", global_scratch_size=0, profile_scratch_siz
 class ScratchABI(unittest.TestCase):
     def test_verified_layout(self):
         require_qualified_compiler("nvidia", "cuda", "3.6.0")
+        for arch in ("gfx936", "gfx938"):
+            require_qualified_compiler("hip", "hip", "3.6.0", arch,
+                                       "triton.backends.hcu.compiler_hcu")
         self.assertEqual(validated_scratch_args(ZERO, PTX, SIGNATURE), 2)
 
     def test_unqualified_compiler_or_platform(self):

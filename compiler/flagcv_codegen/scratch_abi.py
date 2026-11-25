@@ -9,15 +9,15 @@ import re
 def require_qualified_compiler(backend, target, version, arch=None, compiler_module=None):
     # Triton v3.6.0 NVIDIA's launcher appends global and profile scratch
     # pointers, in that order. Qualify vendor launchers separately.
-    hip_compilers = {"gfx936": "triton.backends.hcu.compiler",
-                     "gfx938": "triton.backends.hcu.compiler",
+    hip_compilers = {"gfx936": "triton.backends.hcu.compiler_hcu",
+                     "gfx938": "triton.backends.hcu.compiler_hcu",
                      "gfx1100": "triton.backends.amd.compiler"}
     if (backend in ("hip", "hygon") and target == "hip" and version == "3.6.0"
             and compiler_module is not None and hip_compilers.get(arch) == compiler_module):
         return
     if (backend, target, version) != ("nvidia", "cuda", "3.6.0"):
         raise RuntimeError(
-            f"scratch ABI is unqualified for {backend}/{target} with Triton {version}"
+            f"scratch ABI is unqualified for {backend}/{target}:{arch} with {compiler_module} (Triton {version})"
         )
 
 
