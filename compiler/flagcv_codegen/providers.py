@@ -173,7 +173,10 @@ def plan_threshold_select(request, facts):
 def plan_spatial_filter(request, facts):
     block = 128
     grid = [{"product": ["width", "height", "CHANNELS"], "block": block}, 1, 1]
-    return {"BLOCK": block}, min(4, facts["max_warps"]), grid
+    tuning = {"BLOCK": block}
+    if request["kernel"] == "filter2d_dense":
+        tuning["ROW_PAIR"] = False
+    return tuning, min(4, facts["max_warps"]), grid
 
 
 PLANS = dict.fromkeys(
@@ -194,6 +197,7 @@ PLANS["threshold_select"] = plan_threshold_select
 for route in ("direct", "horizontal", "vertical"):
     PLANS[f"gaussian_{route}"] = plan_spatial_filter
 PLANS["filter2d_direct"] = plan_spatial_filter
+PLANS["filter2d_dense"] = plan_spatial_filter
 PLANS["warp_perspective"] = plan_projective
 PLANS["remap"] = plan_projective
 for mode in ("nearest", "linear", "cubic"):

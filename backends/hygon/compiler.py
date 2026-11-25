@@ -31,8 +31,12 @@ def compile(request):
     # gfx936 has 64 lanes per wave. A 128-element F32 C3 correlation
     # block uses two waves; other targets and data routes keep their plan.
     if (request["target"] == "hip:gfx936:64"
-            and request["kernel"] == "filter2d_direct"
+            and request["kernel"] in ("filter2d_direct", "filter2d_dense")
             and request["images"][0]["depth"] == "32F"
             and request["images"][0]["channels"] == 3):
         num_warps = 2
+        if request["kernel"] == "filter2d_dense":
+            tuning["ROW_PAIR"] = True
+            grid[0] = {"product": ["row_values", "height"],
+                       "factor_blocks": [tuning["BLOCK"], 2], "block": 1}
     return compile_kernel(request, tuning, num_warps, grid)

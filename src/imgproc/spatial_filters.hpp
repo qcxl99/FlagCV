@@ -23,6 +23,7 @@ struct Filter2DPlan::Data {
   Border border;
   FilterAnchor anchor;
   bool zero_filter;
+  bool all_normal_f32_taps;
   std::vector<double> coefficients;
 };
 
