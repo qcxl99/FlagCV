@@ -19,7 +19,8 @@ sys.path.insert(0, str(SOURCE))
 from helpers.benchmark_protocol import PROFILES
 
 NVIDIA_TESTS = {"flagcv.nvidia.public_api", "flagcv.nvidia.platform_failure",
-                "flagcv.nvidia.warpaffine", "flagcv.nvidia.resize", "flagcv.nvidia.cvtcolor"}
+                "flagcv.nvidia.warpaffine",  "flagcv.nvidia.resize", "flagcv.nvidia.cvtcolor",
+                "flagcv.nvidia.border_threshold"}
 
 
 def check_junit(path, expected=None):

@@ -108,6 +108,64 @@ void exercise_fp32(const std::filesystem::path& directory) {
               "incorrect packed float arguments or cached launch");
 }
 
+
+template<class Exception, class Call>
+void expect_failure(Call call, const char* reason) {
+  try {
+    call();
+  } catch (const Exception& error) {
+    require(std::string(error.what()).find(reason) != std::string::npos,
+            "unexpected validation or backend error");
+    return;
+  }
+  throw std::runtime_error("unexpected accepted request");
+}
+
+void exercise_border_and_threshold(const std::filesystem::path& directory) {
+  const auto backend=directory/"backend.trace";
+  const auto compiler=directory/"compiler.trace";
+  std::ofstream{backend};
+  std::ofstream{compiler};
+  alignas(16) std::array<std::uint8_t,32> image{};
+  alignas(16) std::array<std::int32_t,257> scratch{};
+  const flagcv::GpuMat parent(image.data(),4,2,flagcv::Depth::k8U,1,16);
+  const flagcv::GpuMat src(image.data()+2,1,1,flagcv::Depth::k8U,1,16);
+  const flagcv::GpuMat dst(image.data(),2,1,flagcv::Depth::k8U,1,16);
+  const flagcv::BorderParent roi{parent,2,0};
+  flagcv::Handle basic("testfixture");
+  expect_failure<std::invalid_argument>([&] {
+    flagcv::copyMakeBorder(basic,src,dst,{0,0,1,0},flagcv::Border::kReflect,{},&roi);
+  },"overlaps");
+  flagcv::copyMakeBorder(basic,src,dst,{0,0,1,0},flagcv::Border::kReflect);
+  const flagcv::ThresholdScratch work{scratch.data(),sizeof(scratch)};
+  const auto method=flagcv::AutomaticThreshold::kTriangle;
+  const auto mode=flagcv::ThresholdMode::kTrunc;
+  const auto noop_count=lines(backend).size();
+  expect_failure<flagcv::Error>([&] {
+    flagcv::thresholdAutoHost(basic,src,{},0,mode,method,work,true);
+  },"does not support synchronous readback");
+  require(lines(backend).size()==noop_count,"readback preflight enqueued work");
+  require(flagcv::threshold(basic,src,{},-32769.25,0,mode,true)==-32770,
+          "integer dry-run return or floor differs");
+  require(lines(backend).size()==noop_count,"fixed dry-run enqueued work");
+
+  flagcv::Handle readable("readbackfixture");
+  int fake_stream=0;
+  require(flagcv::thresholdAutoHost(readable,src,{},0,mode,method,work,true,&fake_stream)==-1,
+          "automatic signed return differs");
+  require(lines(backend).back()=="readback 0 custom","readback did not receive the selected stream");
+  const auto before=lines(backend).size();
+  require(setenv("FLAGCV_TEST_FAIL_KERNEL","threshold_histogram",1)==0,"failure injection setup");
+  expect_failure<flagcv::Error>([&]{
+    flagcv::thresholdAutoHost(readable,src,{},0,mode,method,work,true);
+  },"rejected invalid launch");
+  unsetenv("FLAGCV_TEST_FAIL_KERNEL");
+  const auto after=lines(backend);
+  require(after.size()==before+2,"unexpected selection or readback after partial enqueue failure");
+  require(after[before].find("launch 0 threshold_clear")==0 &&
+          after.back()=="rejected 0 threshold_histogram","failure did not occur after the clear");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -115,6 +173,7 @@ int main(int argc, char** argv) {
     require(argc == 2, "expected fixture directory");
     exercise(argv[1]);
     exercise_fp32(argv[1]);
+    exercise_border_and_threshold(argv[1]);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

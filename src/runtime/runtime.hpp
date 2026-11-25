@@ -23,6 +23,10 @@ namespace flagcv {
  */
 void launch(Handle& handle, LoweredOp op, Stream stream);
 
+// Optional synchronized readback. Preflight the capability before enqueuing.
+void require_readback(Handle& handle);
+void read_device(Handle& handle, const void* source, void* host, std::size_t size, Stream stream);
+
 /* Preserve the operand ordering used by arithmetic and bitwise lowering. */
 void launch_pointwise(Handle& handle, const GpuMat& src1, const GpuMat& src2,
                       const GpuMat& dst, const GpuMat* mask,

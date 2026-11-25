@@ -105,6 +105,31 @@
       "name": "resize_area_2tap",
       "source": "common/resize.py",
       "function": "_resize_cpu_area_kernel"
+    },
+    {
+      "name": "copy_make_border",
+      "source": "common/copy_make_border.py",
+      "function": "copy_make_border"
+    },
+    {
+      "name": "threshold_apply",
+      "source": "common/threshold.py",
+      "function": "threshold_apply"
+    },
+    {
+      "name": "threshold_histogram",
+      "source": "common/threshold.py",
+      "function": "threshold_histogram"
+    },
+    {
+      "name": "threshold_clear",
+      "source": "common/threshold.py",
+      "function": "threshold_clear"
+    },
+    {
+      "name": "threshold_select",
+      "source": "common/threshold.py",
+      "function": "threshold_select"
     }
   ]
 }

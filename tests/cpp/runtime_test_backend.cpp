@@ -3,8 +3,10 @@
 
 #include "backends/backend.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -60,6 +62,18 @@ int launch(void* raw, void* handle, const unsigned int grid[3],
   const auto device = static_cast<Context*>(raw)->device;
   auto* kernel = static_cast<Kernel*>(handle);
   if (kernel->device != device) return 1;
+  if (const char* fail = std::getenv("FLAGCV_TEST_FAIL_KERNEL")) {
+    if (kernel->symbol == fail) {
+      trace("rejected", device, " " + kernel->symbol);
+      return 1;
+    }
+  }
+  if (kernel->symbol == "threshold_select") {
+    std::uint64_t address;
+    std::memcpy(&address, args[0], sizeof(address));
+    *reinterpret_cast<std::int32_t*>(address) = -1;
+  }
+
   if (kernel->symbol == "_warp_nearest") {
     if (count != 18 || kinds[0] != 0 || kinds[1] != 0) return 1;
     for (unsigned int i = 2; i < count; ++i)
@@ -82,3 +96,12 @@ extern "C" const FlagcvBackendV2* flagcv_backend_v2() {
                                       target, load, unload, launch, last_error};
   return &backend;
 }
+
+#ifdef FLAGCV_TEST_READBACK
+extern "C" int flagcv_readback_v1(void* context, const void* source, void* host,
+                                 size_t size, void* stream) {
+  trace("readback", static_cast<Context*>(context)->device, stream ? " custom" : " default");
+  std::memcpy(host, source, size);
+  return 0;
+}
+#endif

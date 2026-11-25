@@ -72,6 +72,26 @@ void bitwise_not(Handle& handle, const GpuMat& src, const GpuMat& dst,
 void flip(Handle& handle, const GpuMat& src, const GpuMat& dst, int flip_code,
           Stream stream = nullptr);
 
+struct BorderExtents {
+  int top = 0;
+  int bottom = 0;
+  int left = 0;
+  int right = 0;
+};
+
+struct BorderParent {
+  GpuMat image;
+  int x = 0;
+  int y = 0;
+};
+
+// The source is isolated unless a matching parent and ROI origin are supplied.
+// The destination is preallocated and disjoint from the effective sampling view.
+void copyMakeBorder(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                    BorderExtents padding, Border border = Border::kConstant,
+                    const BorderValue& value = {}, const BorderParent* parent = nullptr,
+                    Stream stream = nullptr);
+
 }  // namespace flagcv
 
 #endif  // FLAGCV_CORE_HPP_

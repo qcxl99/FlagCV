@@ -88,6 +88,11 @@ typedef struct FlagcvBackendV2 {
 /* Exported by every plugin under the name FLAGCV_BACKEND_ENTRY. */
 typedef const FlagcvBackendV2* (*FlagcvBackendEntry)(void);
 
+/* Optional synchronous readback extension. This does not change the v2 launch table. */
+#define FLAGCV_READBACK_ENTRY "flagcv_readback_v1"
+typedef int (*FlagcvReadback)(void* context, const void* source, void* host, size_t size,
+                              void* stream);
+
 #ifdef __cplusplus
 }
 #endif

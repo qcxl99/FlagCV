@@ -54,12 +54,17 @@ const char* depth_name(Depth depth) {
  * unloading a vendor runtime while its threads or atexit handlers are live is
  * a common source of shutdown crashes, and the mapping is small.
  */
-const FlagcvBackendV2& load_plugin(const std::string& backend) {
+struct BackendPlugin {
+  const FlagcvBackendV2* table;
+  FlagcvReadback readback;
+};
+
+const BackendPlugin& load_plugin(const std::string& backend) {
   static std::mutex mutex;
-  static std::map<std::string, const FlagcvBackendV2*> plugins;
+  static std::map<std::string, BackendPlugin> plugins;
   std::lock_guard<std::mutex> lock(mutex);
   auto it = plugins.find(backend);
-  if (it != plugins.end()) return *it->second;
+  if (it != plugins.end()) return it->second;
 
   if (backend.empty() || backend.find_first_not_of('_') == std::string::npos)
     throw Error("flagcv: invalid backend name '" + backend + "'");
@@ -86,8 +91,8 @@ const FlagcvBackendV2& load_plugin(const std::string& backend) {
     throw Error("flagcv: " + path +
                 " was built against a different plugin interface version");
   }
-  plugins.emplace(backend, table);
-  return *table;
+  const auto readback = reinterpret_cast<FlagcvReadback>(::dlsym(library, FLAGCV_READBACK_ENTRY));
+  return plugins.emplace(backend, BackendPlugin{table, readback}).first->second;
 }
 
 std::string read_file(const std::string& path) {
@@ -167,6 +172,7 @@ struct Handle::State {
   std::string backend;
   int device = 0;
   const FlagcvBackendV2* plugin = nullptr;
+  FlagcvReadback readback = nullptr;
   void* context = nullptr;
   std::string device_id;
   std::string target;
@@ -192,7 +198,9 @@ struct HandleAccess {
 Handle::Handle(const std::string& backend, int device) : state_(new State) {
   state_->backend = backend;
   state_->device = device;
-  state_->plugin = &load_plugin(backend);
+  const auto& loaded = load_plugin(backend);
+  state_->plugin = loaded.table;
+  state_->readback = loaded.readback;
   const FlagcvBackendV2& plugin = *state_->plugin;
   if (plugin.create_context(device, &state_->context) != 0) {
     state_->plugin = nullptr;  // nothing to release
@@ -205,6 +213,18 @@ Handle::Handle(const std::string& backend, int device) : state_(new State) {
   if (plugin.target(state_->context, buffer, sizeof(buffer)) != 0)
     throw Error(plugin.last_error());
   state_->target = buffer;
+}
+
+void require_readback(Handle& handle) {
+  const auto& state = HandleAccess::state(handle);
+  if (state.readback == nullptr)
+    throw Error("flagcv: backend '" + state.backend + "' does not support synchronous readback");
+}
+
+void read_device(Handle& handle, const void* source, void* host, std::size_t size, Stream stream) {
+  const auto& state = HandleAccess::state(handle);
+  if (state.readback(state.context, source, host, size, stream) != 0)
+    throw Error(std::string("flagcv: ") + state.plugin->last_error());
 }
 
 Handle::~Handle() = default;

@@ -3,9 +3,11 @@
 add_library(flagcv
   core/arithmetic.cpp
   core/bitwise.cpp
+  core/copy_make_border.cpp
   core/flip.cpp
   image/gpumat.cpp
   imgproc/cvtcolor.cpp
+  imgproc/threshold.cpp
   imgproc/resize.cpp
   imgproc/resize_tables.cpp
   imgproc/warpaffine.cpp

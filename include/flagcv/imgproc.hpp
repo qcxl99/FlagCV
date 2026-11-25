@@ -15,9 +15,8 @@
  */
 namespace flagcv {
 
-// A row-major 2x3 transform and a constant value per output channel.
+// A row-major 2x3 transform.
 using AffineMatrix = std::array<double, 6>;
-using BorderValue = std::array<double, 4>;
 
 /*
  * Sample src into the preallocated dst view. Use dst dimensions to set the
@@ -114,6 +113,35 @@ HostTableData cvtColorTableData(ColorTables kind);
  */
 void cvtColor(Handle& handle, const GpuMat& src, const GpuMat& dst, int code,
               DeviceWorkspace workspace = {}, Stream stream = nullptr);
+
+enum class ThresholdMode { kBinary, kBinaryInv, kTrunc, kToZero, kToZeroInv };
+enum class AutomaticThreshold { kOtsu, kTriangle };
+
+// Fixed modes return the CPU-equivalent threshold without synchronizing the
+// device. Dry-run evaluates the return value without writing dst.
+double threshold(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                 double cutoff, double maxval, ThresholdMode mode,
+                 bool dry_run = false, Stream stream = nullptr);
+
+struct ThresholdScratch {
+  void* data = nullptr;
+  std::size_t bytes = 0;
+};
+
+std::size_t thresholdWorkspaceBytes(Depth depth, AutomaticThreshold method);
+
+// The first int32 in scratch receives the signed automatic threshold. Keep
+// the exclusive, disjoint scratch, images, handle and stream alive until
+// queued work has completed, including if a later step throws.
+void thresholdAuto(Handle& handle, const GpuMat& src, const GpuMat& dst, double maxval,
+                   ThresholdMode mode, AutomaticThreshold method, ThresholdScratch scratch,
+                   bool dry_run = false, Stream stream = nullptr);
+
+// Same operation with a synchronized host result. Waits for the chosen
+// stream, then performs the backend's blocking device-to-host readback.
+double thresholdAutoHost(Handle& handle, const GpuMat& src, const GpuMat& dst, double maxval,
+                         ThresholdMode mode, AutomaticThreshold method, ThresholdScratch scratch,
+                         bool dry_run = false, Stream stream = nullptr);
 
 }  // namespace flagcv
 

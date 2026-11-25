@@ -3,6 +3,7 @@
 #ifndef FLAGCV_TYPES_HPP_
 #define FLAGCV_TYPES_HPP_
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -40,6 +41,9 @@ enum class Border {
   kWrap,
   kTransparent,
 };
+
+// One constant value per output channel.
+using BorderValue = std::array<double, 4>;
 
 /*
  * An opaque native backend stream: a cudaStream_t on NVIDIA, an aclrtStream
