@@ -132,6 +132,11 @@
       "function": "threshold_apply"
     },
     {
+      "name": "threshold_histogram_u8_large",
+      "source": "common/threshold.py",
+      "function": "threshold_histogram_u8_large"
+    },
+    {
       "name": "threshold_histogram",
       "source": "common/threshold.py",
       "function": "threshold_histogram"
@@ -165,6 +170,11 @@
       "name": "filter2d_dense",
       "source": "common/spatial_filters.py",
       "function": "filter2d_dense"
+    },
+    {
+      "name": "filter2d_interior",
+      "source": "common/spatial_filters.py",
+      "function": "filter2d_interior"
     },
     {
       "name": "filter2d_direct",

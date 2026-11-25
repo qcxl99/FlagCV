@@ -146,3 +146,6 @@ may also be passed in reversed order for NEAREST and LINEAR/AREA. The
 Each remap image axis must be below 32767, matching OpenCV. Unsupported
 formats, mismatched pixel types or extents, and inputs overlapping the
 output fail before enqueue. Both operations use zero device workspace.
+
+在 SM90，U8 Otsu 的像素数达到 1920×1080 时，直方图按块汇总后写回
+原调用方区域。选择器、结果形态及其它自动阈值路径保持原计算方式。

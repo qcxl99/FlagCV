@@ -168,6 +168,56 @@ def gaussian_vertical(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, ds
 
 
 @triton.jit
+def _filter2d_interior_tile(src, dst, coefficients, width, height, src_stride, dst_stride,
+                            kw, kh, ax, ay, CHANNELS: tl.constexpr, BLOCK: tl.constexpr):
+    columns: tl.constexpr = BLOCK // CHANNELS
+    lane = tl.arange(0, BLOCK)
+    start = tl.program_id(1).to(tl.int64) * columns
+    x = start + lane // CHANNELS
+    y = tl.program_id(0).to(tl.int64)
+    channel = lane % CHANNELS
+    valid = (lane < columns * CHANNELS) & (x < width)
+    top = y - ay
+    left = start - ax
+    # One uniform branch per output tile. The boundary path retains reflect101.
+    interior = (top >= 0) & (top + kh <= height) & (left >= 0) & (left + columns + kw - 1 <= width)
+    value = tl.full((BLOCK,), 0, tl.float32) + tl.load(coefficients).to(tl.float32)
+    if interior:
+        offset = top * src_stride + (x - ax) * CHANNELS + channel
+        for iy in range(kh):
+            for ix in range(kw):
+                weight = tl.load(coefficients + 1 + iy * kw + ix).to(tl.float32)
+                if weight != 0:
+                    sample = tl.load(src + offset + iy * src_stride + ix * CHANNELS, valid, 0)
+                    value += sample * weight
+    else:
+        for iy in range(kh):
+            for ix in range(kw):
+                weight = tl.load(coefficients + 1 + iy * kw + ix).to(tl.float32)
+                if weight != 0:
+                    sample = _load_pixel(src, x + ix - ax, top + iy, channel, width, height,
+                                        src_stride, valid, CHANNELS, 3)
+                    value += sample * weight
+    tl.store(dst + y * dst_stride + x * CHANNELS + channel, value, valid)
+
+
+@triton.jit
+def filter2d_interior(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                      kernel_width, kernel_height, anchor_x, anchor_y,
+                      CHANNELS: tl.constexpr, BORDER: tl.constexpr, FP64: tl.constexpr,
+                      ZERO_FILTER: tl.constexpr, DEST_INTEGER: tl.constexpr,
+                      DEST_MIN: tl.constexpr, DEST_MAX: tl.constexpr,
+                      BLOCK: tl.constexpr, INTERIOR_TILE: tl.constexpr):
+    if INTERIOR_TILE:
+        _filter2d_interior_tile(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                               kernel_width, kernel_height, anchor_x, anchor_y, CHANNELS, BLOCK)
+    else:
+        filter2d_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                        kernel_width, kernel_height, anchor_x, anchor_y, CHANNELS,
+                        BORDER, FP64, ZERO_FILTER, DEST_INTEGER, DEST_MIN, DEST_MAX, BLOCK)
+
+
+@triton.jit
 def filter2d_dense(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
                    row_values, kernel_width, kernel_height, anchor_x, anchor_y,
                    CHANNELS: tl.constexpr, BORDER: tl.constexpr, FP64: tl.constexpr,

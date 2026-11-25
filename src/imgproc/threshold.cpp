@@ -179,7 +179,9 @@ void thresholdAuto(Handle& handle, const GpuMat& src, const GpuMat& dst, double 
   launch(handle, std::move(clear), stream);
 
   LoweredOp histogram;
-  histogram.kernel = "threshold_histogram";
+  const bool large_u8_otsu = source.depth == Depth::k8U && method == AutomaticThreshold::kOtsu &&
+                             values * source.height >= 1920 * 1080;
+  histogram.kernel = large_u8_otsu ? "threshold_histogram_u8_large" : "threshold_histogram";
   histogram.images = {source, buffer};
   histogram.add_param("rows", source.height);
   histogram.add_param("row_values", values);

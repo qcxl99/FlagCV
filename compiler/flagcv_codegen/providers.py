@@ -161,7 +161,10 @@ def plan_flat(request, facts):
     block = 256
     rows = "dst_h" if request["kernel"] == "copy_make_border" else "rows"
     grid = [{"product": [rows, "row_values"], "block": block}, 1, 1]
-    return {"BLOCK": block}, min(4, facts["max_warps"]), grid
+    tuning = {"BLOCK": block}
+    if request["kernel"] == "threshold_histogram_u8_large":
+        tuning["PRIVATE_8U"] = False
+    return tuning, min(4, facts["max_warps"]), grid
 
 
 def plan_threshold_clear(request, facts):
@@ -184,6 +187,8 @@ def plan_spatial_filter(request, facts):
     tuning = {"BLOCK": block}
     if request["kernel"] == "filter2d_dense":
         tuning["ROW_PAIR"] = False
+    if request["kernel"] == "filter2d_interior":
+        tuning["INTERIOR_TILE"] = False
     return tuning, min(4, facts["max_warps"]), grid
 
 
@@ -200,11 +205,13 @@ PLANS["cvtcolor_swap_c4"] = plan_cvtcolor
 PLANS["copy_make_border"] = plan_flat
 PLANS["threshold_apply"] = plan_flat
 PLANS["threshold_histogram"] = plan_flat
+PLANS["threshold_histogram_u8_large"] = plan_flat
 PLANS["threshold_clear"] = plan_threshold_clear
 PLANS["threshold_select"] = plan_threshold_select
 for route in ("direct", "horizontal", "vertical"):
     PLANS[f"gaussian_{route}"] = plan_spatial_filter
 PLANS["filter2d_direct"] = plan_spatial_filter
+PLANS["filter2d_interior"] = plan_spatial_filter
 PLANS["filter2d_dense"] = plan_spatial_filter
 PLANS["warp_perspective"] = plan_projective
 PLANS["remap"] = plan_projective

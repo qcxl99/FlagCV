@@ -76,6 +76,22 @@ def threshold_histogram(src_ptr, workspace_ptr, rows, row_values, src_rs,
 
 
 @triton.jit
+def threshold_histogram_u8_large(src_ptr, workspace_ptr, rows, row_values, src_rs,
+                        BLOCK: tl.constexpr, PRIVATE_8U: tl.constexpr):
+    index = tl.program_id(0).to(tl.int64) * BLOCK + tl.arange(0, BLOCK).to(tl.int64)
+    row = index // row_values
+    col = index % row_values
+    valid = row < rows
+    value = tl.load(src_ptr + row * src_rs + col, mask=valid, other=0)
+    if PRIVATE_8U:
+        counts = tl.histogram(value.to(tl.int32), 256, valid)
+        bins = tl.arange(0, 256)
+        tl.atomic_add(workspace_ptr + 1 + bins, counts, sem="relaxed", mask=counts != 0)
+    else:
+        tl.atomic_add(workspace_ptr + 1 + value.to(tl.int32), 1, sem="relaxed", mask=valid)
+
+
+@triton.jit
 def _triangle_vector(hist):
     index = tl.arange(0, 256)
     counts = tl.load(hist + index)

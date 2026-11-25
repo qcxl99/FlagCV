@@ -84,7 +84,7 @@ def evaluate_grid(plan, params):
     return grid
 
 
-def point_plan(call):
+def point_plan(call, large_u8_otsu):
     # The existing helpers own OpenCV-compatible scalar encoding and arguments.
     # Capture those arguments once, then let the installed provider plan each launch.
     planned = []
@@ -95,6 +95,10 @@ def point_plan(call):
     class CaptureKernel:
         def __init__(self, name, fn):
             self.name, self.fn = name, fn
+            if name == "threshold_histogram" and large_u8_otsu:
+                self.name = "threshold_histogram_u8_large"
+                spec = registry[self.name]
+                self.fn = loader(str(data/"kernels"/spec["source"]), spec["function"])
 
         def __getitem__(self, _helper_grid):
             def capture(*args, **kwargs):
@@ -249,7 +253,7 @@ def run_case(identifier):
                     native_plan = cv2.cuda.createLinearFilter(cvtype,cvtype,weights,(-1,-1),edge)
             return None, native_plan.apply(native_source, native_output, native_stream)
     if operation in ("copy", "threshold"):
-        candidate = point_plan(candidate)
+        candidate = point_plan(candidate, depth == 0 and automatic == cv2.THRESH_OTSU and h*w >= 1920*1080)
     compiled = candidate()
     launch = [dict(name=k.metadata.name, hash=k.hash, stages=k.metadata.num_stages,
                    fusion=k.metadata.enable_fp_fusion, warps=k.metadata.num_warps, **plan)

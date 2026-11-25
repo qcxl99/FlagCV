@@ -49,6 +49,13 @@ def compile(request):
         elif request["kernel"] == "resize_area_polyphase":
             tuning.update(POLYPHASE=True, BLOCK_H=2, BLOCK_W=128)
             grid[0]["factor_blocks"] = [2, 256]
+        elif request["kernel"] == "threshold_histogram_u8_large":
+            tuning.update(PRIVATE_8U=True, BLOCK=2048)
+            grid[0]["block"] = 2048
+        elif request["kernel"] == "filter2d_interior":
+            tuning.update(INTERIOR_TILE=True, BLOCK=256)
+            grid = [{"product": ["height"], "block": 1},
+                    {"product": ["width"], "block": 64}, 1]
         elif request["kernel"] == "resize_area_2tap":
             tuning["UNROLL_TWO_TAPS"] = True
     params = {param["name"]: param for param in request["params"]}

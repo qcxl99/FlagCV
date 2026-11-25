@@ -122,7 +122,14 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
       src.width() >= 256 && src.height() >= 128 &&
       data.kernel.width >= 3 && data.kernel.width <= 9 &&
       data.kernel.height >= 3 && data.kernel.height <= 9;
-  auto op = prepare(dense_pair_candidate ? "filter2d_dense" : "filter2d_direct",
+  const bool interior_candidate =
+      data.source_depth == Depth::k32F && data.destination_depth == Depth::k32F &&
+      data.border == Border::kReflect101 && !data.zero_filter && src.channels() == 4 &&
+      src.width() >= 1920 && src.height() >= 1080 &&
+      data.kernel.width == 7 && data.kernel.height == 7;
+  const char* kernel = dense_pair_candidate ? "filter2d_dense" :
+                       interior_candidate ? "filter2d_interior" : "filter2d_direct";
+  auto op = prepare(kernel,
                     src, dst, data.source_depth, data.destination_depth, workspace, plan.table().bytes);
   if (dense_pair_candidate)
     op.add_param("row_values", std::int64_t{src.width()} * src.channels());
