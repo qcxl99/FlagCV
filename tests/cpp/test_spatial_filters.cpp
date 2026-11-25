@@ -200,6 +200,61 @@ void filter_half_weight_reference(Handle& handle, const Stream& upload, const St
   std::cout << "filter2D 8 exact half-weight fixtures passed\n";
 }
 
+void filter_three_tap_reference(Handle& handle, const Stream& upload, const Stream& use) {
+  std::array<double, 81> weights{};
+  weights[4 * 9 + 4] = 0.5;
+  weights[4 * 9 + 5] = 0.25;
+  weights[5 * 9 + 4] = 0.25;
+  const Filter2DPlan plan({9, 9}, weights.data(), Depth::k16U,
+                          {{}, {4, 4}, 0, Border::kReflect101});
+  constexpr std::array<std::uint16_t, 13> extremes{
+      0, 65535, 65534, 1, 2, 3, 65533, 65532, 4, 5, 6, 7, 65531};
+  constexpr Size cases[] = {{37, 19}, {768, 512}, {9, 1}, {1, 9}, {1, 1}, {17, 13}};
+  std::array<bool, 8> residues{};
+  for (const Size size : cases) {
+    Image src(size.height, size.width, CV_16UC1, 3, 1, 7);
+    Image dst(size.height, size.width, CV_16UC1, 4, 2, 5);
+    src.host.setTo(cv::Scalar::all(31));
+    dst.host.setTo(cv::Scalar::all(17));
+    auto input = src.pixels();
+    auto initial = dst.pixels();
+    if (size.width == 37 || size.width == 768) {
+      cv::Mat packed(input.size(), input.type());
+      cv::RNG rng(40738);
+      rng.fill(packed, cv::RNG::UNIFORM, 0, 1024);
+      packed.copyTo(input);
+    } else if (size.width == 1 && size.height == 1) {
+      input.ptr<std::uint16_t>(0)[0] = 65535;
+    } else {
+      for (int y = 0; y < size.height; ++y)
+        for (int x = 0; x < size.width; ++x)
+          input.ptr<std::uint16_t>(y)[x] = extremes[(y * size.width + x) % extremes.size()];
+    }
+    cv::Mat expected(input.size(), input.type());
+    for (int y = 0; y < size.height; ++y) {
+      const int below = y + 1 < size.height ? y + 1 : std::max(0, size.height - 2);
+      for (int x = 0; x < size.width; ++x) {
+        const int right = x + 1 < size.width ? x + 1 : std::max(0, size.width - 2);
+        const auto* row = input.ptr<std::uint16_t>(y);
+        const std::uint32_t total = 2u * row[x] + row[right] + input.ptr<std::uint16_t>(below)[x];
+        residues[total % residues.size()] = true;
+        const auto q = total / 4;
+        const auto m = total % 4;
+        const auto rounded = static_cast<std::uint16_t>(q + (m > 2 || (m == 2 && (q & 1u))));
+        expected.ptr<std::uint16_t>(y)[x] = rounded;
+        initial.ptr<std::uint16_t>(y)[x] = static_cast<std::uint16_t>(~rounded);
+      }
+    }
+    execute(handle, upload, use, src, dst, plan.table(), expected,
+            [&](auto& h, const auto& s, const auto& d, auto workspace, auto stream) {
+              flagcv::filter2D(h, s, d, plan, workspace, stream);
+            });
+    std::cout << "filter2D exact three-tap " << size.height << 'x' << size.width << " passed\n";
+  }
+  require(std::all_of(residues.begin(), residues.end(), [](bool tested) { return tested; }),
+          "three-tap fixtures must cover all remainders and both quotient parities");
+}
+
 bool gaussian_sigma_boundaries(Handle& handle, const Stream& upload, const Stream& use) {
   bool all_equal = true;
   for (const int depth : {CV_8U, CV_16U}) {
@@ -411,6 +466,10 @@ int main(int argc, char** argv) {
       filter_half_weight_reference(handle, upload, custom);
       return 0;
     }
+    if (argc == 2 && std::string_view(argv[1]) == "--filter2d-three-tap-reference") {
+      filter_three_tap_reference(handle, upload, custom);
+      return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") {
       std::cout << "case,block,direct_sync_us,separable_sync_us,scratch_bytes\n";
       benchmark(handle, custom);
@@ -500,6 +559,7 @@ int main(int argc, char** argv) {
     row_pair_cases(handle, upload, custom);
     std::cout << "filter2D " << passed + 7 << " reference cases passed\n";
     filter_half_weight_reference(handle, upload, custom);
+    filter_three_tap_reference(handle, upload, custom);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

@@ -42,10 +42,17 @@ U16 和 S16 各可输出同深度、F32 或 F64。F32 与 F64 也各自支持同
 
 固定 CPU 的同深 C1 大核在隔离视图上按核面积进入 DFT，8U 的阈值是 130，
 16U 是 50。对 16U，CPU 把有效系数转成 F32，频域相关用 F64，裁切后按
-`convertTo` 转成目标整数。`abs(delta) < DBL_EPSILON` 时使用无缩放转换。带缩放的转换在固定
-SSE3 上按实际转换块宽选择路径。8 个像素起的 SIMD 组先把源值窄化为 F32，
-再以 F32 加上 `float(delta)`。短于 8 的块走标量，保留 F64 源值，
-使用转换后的 `float(delta)`。分块尺寸及连续行合并决定有效转换宽度。
+`convertTo` 转成目标整数。`abs(delta) < DBL_EPSILON` 时使用无缩放转换，
+SIMD 与标量均直接舍入 F64 源值。带缩放转换按实际 DFT 块的转换宽度选路径。
+从 8 个元素起，SIMD 先窄化 F64 源值，再以 F32 加上 `float(delta)`。
+最后一组可以回退到末尾 8 个元素，与上一组重叠。短于 8 的块使用
+F64 源值和转换后的 `float(delta)`，再执行标量舍入。
+
+核宽为 `K`、图像宽为 `W` 时，内部块宽先取
+`g = min(W, max(cvRound(4.5 * K), 257 - K))`。变换宽取
+`F = max(2, getOptimalDFTSize(g + K - 1))`。有效块宽为
+`B = min(W, F - K + 1)`。最后一块使用剩余宽度。`K=1` 的裁切块可能连续，
+源和目标块均连续且展平长度小于 `INT_MAX` 时，`convertTo` 合并各行。
 
 19×37 U16C1 视图取值 65535 时，两组相消用例在 7×7 核返回 0，
 在 9×9 核分别返回 3 和 4。9×9 中心半权核、输入 65533 与 `delta=1e-4`
@@ -60,6 +67,7 @@ C++ 计时包括所有提交、同步及中间图流量，分配与表上传单�
 HIP 测试目标是 flagcv.hip.spatial_filters。其测试程序还提供
 `--gaussian-boundary` 和 `--benchmark` 分别复验舍入边界与选定公开调用的同步 wall。
 `--filter2d-half-reference` 复验四个半权配置的奇偶输入。
+`--filter2d-three-tap-reference` 验证 16U 的三系数半步舍入、极值、单轴和行距。
 `--row-pair` 校验行复用和窄化为零的系数回退。
 
 gfx936 的 F32 C3 同深输出在 REFLECT_101、宽至少 256、高至少 128、
