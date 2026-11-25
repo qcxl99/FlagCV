@@ -67,6 +67,16 @@
       "function": "_warp_cubic"
     },
     {
+      "name": "warp_perspective",
+      "source": "common/projective.py",
+      "function": "perspective_kernel"
+    },
+    {
+      "name": "remap",
+      "source": "common/projective.py",
+      "function": "remap_kernel"
+    },
+    {
       "name": "resize_copy",
       "source": "common/resize.py",
       "function": "_resize_copy"

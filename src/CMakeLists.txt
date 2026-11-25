@@ -12,12 +12,14 @@ add_library(flagcv
   imgproc/resize_tables.cpp
   imgproc/warpaffine.cpp
   imgproc/spatial_filters.cpp
+  imgproc/projective.cpp
   lowering/flip.cpp
   lowering/pointwise.cpp
   lowering/cvtcolor.cpp
   lowering/resize.cpp
   lowering/warpaffine.cpp
   lowering/spatial_filters.cpp
+  lowering/projective.cpp
   runtime/compiler_client.cpp
   runtime/json.cpp
   runtime/paths.cpp

@@ -172,8 +172,10 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     require_qualified_compiler(request["backend"], target.backend, triton.__version__,
                                target.arch, type(backend).__module__)
     options = {"num_warps": num_warps, "num_stages": num_stages}
-    if request["kernel"].startswith(("warp_affine_", "resize_", "cvtcolor",
-                                      "threshold_select", "gaussian_", "filter2d_")):
+    kernel = request["kernel"]
+    if (kernel in ("warp_perspective", "remap") or
+            kernel.startswith(("warp_affine_", "resize_", "cvtcolor",
+                               "threshold_select", "gaussian_", "filter2d_"))):
         # The CPU reference rounds each uncontracted arithmetic operation.
         options["enable_fp_fusion"] = False
     options = backend.parse_options(options)

@@ -111,3 +111,38 @@ int32。浮点模式返回原 double。像素等于阈值时属于小于等于�
 厂商提供的阻塞 D2H。整个等待和 D2H 都属于公开调用耗时。原生阻塞复制可能带来的
 其他等待按设备实测记录。HIP 和 NVIDIA 提供该扩展，公开 Handle 和插件 V2 表
 保持原样。
+
+### warpPerspective and remap
+
+Both enqueue into a preallocated, packed 8U, 16U or 32F destination
+with 1, 3 or 4 channels, an independent pitch and ROI-local coordinates.
+They support NEAREST, LINEAR and CUBIC. AREA uses LINEAR. All six
+FlagCV border modes are supported. Initialize the destination before
+TRANSPARENT and keep it and every input alive until the native stream
+completes. Constant borders take one value per channel.
+
+`warpPerspective` takes a row-major 3×3 double matrix. The default inverts the
+source-to-destination transform on the host. With `inverse_map=true`, the
+matrix maps destination coordinates to source coordinates directly. A
+singular forward matrix inverts to zero, as in the fixed OpenCV reference.
+The input and effective coefficients must be finite and the effective
+coefficients must fit FP32. The source's byte span must fit signed 32-bit
+SIMD offsets. Perspective does not have the signed-short remap axis limit.
+
+`remap` derives the output coordinates from maps with the destination
+extent and independent pitches. The table gives the accepted combinations.
+
+| First map | Second map | Interpolation |
+| --- | --- | --- |
+| 32FC2, packed X/Y | Empty | All |
+| 32FC1, X | 32FC1, Y | All |
+| 16SC2, packed integer X/Y | 16UC1 or 16SC1, fractional index | All |
+| 16SC2, packed integer X/Y | Empty | NEAREST |
+
+Fraction indices have five low X bits and five Y bits. The higher bits are
+ignored. Signed indices use the same bit representation. The fixed pair
+may also be passed in reversed order for NEAREST and LINEAR/AREA. The
+`relative_map` option adds the destination's ROI-local pixel coordinates.
+Each remap image axis must be below 32767, matching OpenCV. Unsupported
+formats, mismatched pixel types or extents, and inputs overlapping the
+output fail before enqueue. Both operations use zero device workspace.

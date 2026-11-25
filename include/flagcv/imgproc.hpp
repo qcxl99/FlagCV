@@ -37,6 +37,37 @@ void warpAffine(Handle& handle, const GpuMat& src, const GpuMat& dst,
                 const BorderValue& border_value = {},
                 bool inverse_map = false, Stream stream = nullptr);
 
+using PerspectiveMatrix = std::array<double, 9>;
+
+/*
+ * Project dst pixels into src using a row-major homogeneous transform.
+ * The default takes a source-to-destination matrix and inverts it on the host.
+ * See remap for supported image layouts, interpolation and stream lifetime.
+ */
+void warpPerspective(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                     const PerspectiveMatrix& matrix,
+                     Interpolation interpolation = Interpolation::kLinear,
+                     Border border = Border::kConstant,
+                     const BorderValue& border_value = {},
+                     bool inverse_map = false, Stream stream = nullptr);
+
+/*
+ * Maps match dst dimensions. Supply 32FC2 alone, two 32FC1 views,
+ * or 16SC2 with a 16UC1/16SC1 fraction view. Nearest also accepts 16SC2 alone.
+ * Fixed fractions store five X bits followed by five Y bits.
+ * With relative_map, add the destination pixel's ROI-local coordinates.
+ * Both operators accept packed 8U/16U/32F images with 1, 3 or 4 channels
+ * and independent row pitches. Area aliases linear. Initialize dst before
+ * transparent sampling. Input views must be disjoint from dst and all device
+ * views and the Handle must remain valid until stream completion.
+ */
+void remap(Handle& handle, const GpuMat& src, const GpuMat& dst,
+           const GpuMat& map1, const GpuMat& map2 = {},
+           Interpolation interpolation = Interpolation::kLinear,
+           Border border = Border::kConstant,
+           const BorderValue& border_value = {},
+           bool relative_map = false, Stream stream = nullptr);
+
 // Positive width and height select an explicit size. {0, 0} selects scales.
 struct Size {
   int width = 0;
