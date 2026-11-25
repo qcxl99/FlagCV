@@ -76,9 +76,78 @@ def threshold_histogram(src_ptr, workspace_ptr, rows, row_values, src_rs,
 
 
 @triton.jit
-def threshold_select(workspace_ptr, pixels, BINS: tl.constexpr, TRIANGLE: tl.constexpr):
+def _triangle_vector(hist):
+    index = tl.arange(0, 256)
+    counts = tl.load(hist + index)
+    left = tl.maximum(tl.min(tl.where(counts > 0, index, 256), 0) - 1, 0)
+    right = tl.minimum(tl.max(tl.where(counts > 0, index, 0), 0) + 1, 255)
+    peak_count = tl.max(counts, 0)
+    peak = tl.min(tl.where(counts == peak_count, index, 256), 0)
+    flip = peak - left < right - peak
+    left = tl.where(flip, 255 - right, left)
+    peak = tl.where(flip, 255 - peak, peak)
+    counts = tl.load(hist + tl.where(flip, 255 - index, index))
+    scores = peak_count.to(tl.int64) * index + (left - peak).to(tl.int64) * counts
+    scores = tl.where((index > left) & (index <= peak), scores, 0)
+    best = tl.max(scores, 0)
+    # The CPU scans from the left and advances only on a strict increase.
+    first = tl.min(tl.where(scores == best, index, 256), 0)
+    cutoff = tl.where(best > 0, first, left) - 1
+    return tl.where(flip, 255 - cutoff, cutoff)
+
+
+@triton.jit
+def _otsu_score_tiles(hist, one, scale, mean, BINS: tl.constexpr, TILE: tl.constexpr):
+    # Preserve the CPU's bin-by-bin probability and first-mean recurrence,
+    # including multiplying the mean before rejecting an empty class. Only
+    # the second mean and score are independent across iterations.
+    first_mean = tl.full((), 0.0, tl.float64)
+    first_prob = tl.full((), 0.0, tl.float64)
+    best = tl.full((), 0.0, tl.float64)
+    cutoff = tl.full((), 0, tl.int32)
+    offsets = tl.arange(0, TILE)
+    epsilon: tl.constexpr = 1.1920928955078125e-7
+    base = 0
+    # Histogram counts are nonnegative. Once the second class is below the
+    # epsilon guard it cannot recover, so later tiles cannot change cutoff.
+    while (base < BINS) & ((one - first_prob) >= epsilon) & (first_prob <= one - epsilon):
+        counts = tl.load(hist + base + offsets)
+        # Before a first class has qualified, first_mean is zero. An all-zero
+        # tile changes neither state; empty tiles inside the scan still run.
+        if (first_prob >= epsilon) | (tl.max(counts, 0) != 0):
+            probability = tl.full((TILE,), 0.0, tl.float64)
+            means = tl.full((TILE,), 0.0, tl.float64)
+            for j in range(0, TILE):
+                i = base + j
+                count = tl.sum(tl.gather(counts, tl.full((1,), j, tl.int32), axis=0), 0)
+                p = count.to(tl.float64) * scale
+                first_mean *= first_prob
+                first_prob += p
+                other = one - first_prob
+                if (tl.minimum(first_prob, other) >= epsilon) & (tl.maximum(first_prob, other) <= one - epsilon):
+                    first_mean = (first_mean + i * p) / first_prob
+                probability = tl.where(offsets == j, first_prob, probability)
+                means = tl.where(offsets == j, first_mean, means)
+            other = one - probability
+            valid = (tl.minimum(probability, other) >= epsilon) & (tl.maximum(probability, other) <= one - epsilon)
+            other_mean = (mean - probability * means) / tl.where(valid, other, one)
+            delta = means - other_mean
+            scores = tl.where(valid, ((probability * other) * delta) * delta, 0.0)
+            tile_best = tl.max(scores, 0)
+            if tile_best > best:
+                best = tile_best
+                cutoff = base + tl.min(tl.where(scores == tile_best, offsets, TILE), 0)
+        base += TILE
+    return cutoff
+
+
+@triton.jit
+def threshold_select(workspace_ptr, pixels, BINS: tl.constexpr, TRIANGLE: tl.constexpr,
+                     OTSU_TILE: tl.constexpr = 0, TRIANGLE_VECTOR: tl.constexpr = False):
     hist = workspace_ptr + 1
-    if TRIANGLE:
+    if TRIANGLE and TRIANGLE_VECTOR:
+        cutoff = _triangle_vector(hist)
+    elif TRIANGLE:
         left = tl.full((), 256, tl.int32)
         right = tl.full((), 0, tl.int32)
         peak = tl.full((), 0, tl.int32)
@@ -114,22 +183,25 @@ def threshold_select(workspace_ptr, pixels, BINS: tl.constexpr, TRIANGLE: tl.con
         one = tl.full((), 1.0, tl.float64)
         scale = one / tl.cast(pixels, tl.float64)
         mean = tl.sum(moment, 0).to(tl.float64) * scale
-        first_mean = tl.full((), 0.0, tl.float64)
-        first_prob = tl.full((), 0.0, tl.float64)
-        best = tl.full((), 0.0, tl.float64)
-        cutoff = tl.full((), 0, tl.int32)
-        for i in range(0, BINS):
-            probability = tl.load(hist + i).to(tl.float64) * scale
-            first_mean *= first_prob
-            first_prob += probability
-            other_prob = one - first_prob
-            epsilon: tl.constexpr = 1.1920928955078125e-7
-            if (tl.minimum(first_prob, other_prob) >= epsilon) & (tl.maximum(first_prob, other_prob) <= one - epsilon):
-                first_mean = (first_mean + i * probability) / first_prob
-                other_mean = (mean - first_prob * first_mean) / other_prob
-                delta = first_mean - other_mean
-                score = ((first_prob * other_prob) * delta) * delta
-                if score > best:
-                    best = score
-                    cutoff = i
+        if OTSU_TILE:
+            cutoff = _otsu_score_tiles(hist, one, scale, mean, BINS, OTSU_TILE)
+        else:
+            first_mean = tl.full((), 0.0, tl.float64)
+            first_prob = tl.full((), 0.0, tl.float64)
+            best = tl.full((), 0.0, tl.float64)
+            cutoff = tl.full((), 0, tl.int32)
+            for i in range(0, BINS):
+                probability = tl.load(hist + i).to(tl.float64) * scale
+                first_mean *= first_prob
+                first_prob += probability
+                other_prob = one - first_prob
+                epsilon: tl.constexpr = 1.1920928955078125e-7
+                if (tl.minimum(first_prob, other_prob) >= epsilon) & (tl.maximum(first_prob, other_prob) <= one - epsilon):
+                    first_mean = (first_mean + i * probability) / first_prob
+                    other_mean = (mean - first_prob * first_mean) / other_prob
+                    delta = first_mean - other_mean
+                    score = ((first_prob * other_prob) * delta) * delta
+                    if score > best:
+                        best = score
+                        cutoff = i
     tl.store(workspace_ptr, cutoff)
