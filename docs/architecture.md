@@ -99,7 +99,9 @@ compares that count with the backend expectation before loading the binary.
 
 Iluvatar, Hygon, MThreads, T-Head and Ascend need their exact compiler build,
 emitted argument layout, scratch metadata semantics and an on-device public API
-test before enabling native launch. Their plugin sources remain buildable.
+test before enabling native launch. Ascend is excluded from C++ builds until
+its device lifecycle is qualified. Its source rejects Handle creation without
+initializing AscendCL, changing the active device or acquiring device resources.
 The standalone Python evaluation continues to use each compiler's own launcher.
 NVIDIA validation used CUDA sm90 on H20. Other versions and vendor variants
 need a qualification of their own.
@@ -108,6 +110,16 @@ The process-group cleanup follows the approach in
 [FlagDNN's compiler client](https://github.com/flagos-ai/FlagDNN/blob/a84bcc18a172fa01597d2fc171ce3af680f3074a/src/runtime/compiler_client.cpp#L671).
 The CUDA parameter order is from the
 [Triton 3.6.0 NVIDIA launcher](https://github.com/triton-lang/triton/blob/v3.6.0/third_party/nvidia/backend/driver.py).
+
+## Ascend enablement
+
+Before enabling the backend, verify that two Handles can use the caller's
+existing context, buffers and native stream. Check that destroying either
+Handle preserves the other Handle, the caller's context and stream, and
+ongoing work. FlagCV must release only its owned module registrations while
+the application retains device reset and AscendCL finalization. Verify the
+error path for a mismatched context or device and the supported CANN/FlagTree
+artifact ABI on the target device.
 
 ## Units: pitch vs stride
 
@@ -149,7 +161,7 @@ broken the contract.
 | `hygon` | `hip/hip_runtime.h` | `.hsaco` | 64 | |
 | `mthreads` | `musa.h` | `.mubin` | 32 | Triton backend name is `mtgpu` |
 | `thead` | `hggc.h` | `.hgbin` | 32 | Triton backend name is `PPU` |
-| `ascend` | `acl/acl.h`, `rt.h` | `.npubin` | 1 | runtime registration, packed args |
+| `ascend` (unavailable) | `acl/acl.h`, `rt.h` | `.npubin` | 1 | preview source, excluded from C++ builds |
 
 Five of them share one implementation, `backends/common/driver_backend.hpp`:
 their driver APIs have the CUDA shape (init, primary context, push/pop, load

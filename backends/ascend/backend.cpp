@@ -77,22 +77,15 @@ struct Kernel {
   std::string name;
 };
 
-int create_context(int device, void** out) {
-  if (aclInit(nullptr) != ACL_ERROR_NONE) return fail("aclInit failed");
-  if (aclrtSetDevice(device) != ACL_ERROR_NONE)
-    return fail("aclrtSetDevice failed");
-  auto* ctx = new Context;
-  ctx->index = device;
-  *out = ctx;
-  return 0;
+int create_context(int, void** out) {
+  *out = nullptr;
+  // ACL initialization and the active context belong to the application.
+  // Keep the preview closed until borrowed-context and stream use are qualified.
+  return fail("C++ backend unavailable: device lifecycle and scratch ABI are unqualified");
 }
 
-void destroy_context(void* context) {
-  auto* ctx = static_cast<Context*>(context);
-  if (ctx == nullptr) return;
-  aclrtResetDevice(ctx->index);
-  aclFinalize();
-  delete ctx;
+void destroy_context(void*) {
+  // create_context does not acquire any ACL resources.
 }
 
 int device_id(void* context, char* buffer, size_t size) {
