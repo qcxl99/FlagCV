@@ -86,6 +86,19 @@ class Scope {
 };
 
 template <typename Api>
+int readback(void* context, const void* source, void* host, size_t size, void* stream) {
+  auto* ctx = static_cast<Context<Api>*>(context);
+  Scope<Api> scope(ctx->context);
+  if (!scope.ok())
+    return fail(Api::name(), "cannot make the readback device current");
+  if (Api::stream_synchronize(stream) != Api::success())
+    return fail(Api::name(), "cannot synchronize the stream for readback");
+  if (Api::copy_to_host(host, source, size) != Api::success())
+    return fail(Api::name(), "cannot read the device result");
+  return 0;
+}
+
+template <typename Api>
 int write_string(const std::string& value, char* buffer, size_t size) {
   if (value.size() + 1 > size)
     return fail(Api::name(), "output buffer too small");

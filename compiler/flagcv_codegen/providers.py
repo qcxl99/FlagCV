@@ -120,6 +120,23 @@ def plan_cvtcolor(request, facts):
     return {"BLOCK": block, "COL_GRID_LIMIT": col_limit}, min(4, facts["max_warps"]), grid
 
 
+
+def plan_flat(request, facts):
+    block = 256
+    rows = "dst_h" if request["kernel"] == "copy_make_border" else "rows"
+    grid = [{"product": [rows, "row_values"], "block": block}, 1, 1]
+    return {"BLOCK": block}, min(4, facts["max_warps"]), grid
+
+
+def plan_threshold_clear(request, facts):
+    block = 256
+    return {"BLOCK": block}, min(4, facts["max_warps"]), [{"product": ["bins"], "block": block}, 1, 1]
+
+
+def plan_threshold_select(request, facts):
+    return {}, 1, [1, 1, 1]
+
+
 PLANS = dict.fromkeys(
     (
         "add", "subtract", "multiply", "bitwise_and", "bitwise_not",
@@ -129,6 +146,11 @@ PLANS = dict.fromkeys(
 )
 PLANS["flip"] = plan_flip
 PLANS["cvtcolor"] = plan_cvtcolor
+PLANS["copy_make_border"] = plan_flat
+PLANS["threshold_apply"] = plan_flat
+PLANS["threshold_histogram"] = plan_flat
+PLANS["threshold_clear"] = plan_threshold_clear
+PLANS["threshold_select"] = plan_threshold_select
 for mode in ("nearest", "linear", "cubic"):
     PLANS[f"warp_affine_{mode}"] = plan_warp_affine
 for route in ("copy", "nearest", "separable", "area", "area_fast"):

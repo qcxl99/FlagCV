@@ -41,3 +41,12 @@ CUDA 逐例基线覆盖已核对的共同支持范围。16F、C++ 掩码、原�
 | 3 | `GaussianBlur`、`filter2D`、`threshold` | 按边界策略和采样规则建立参考样本 |
 
 AMD 新工具链与新设备继续按 HIP 交付流程验证。[AMD PR #3](https://github.com/flagos-ai/FlagCV/pull/3)
+
+## BW1101 第二批主题
+
+| 算子 | C++ 语义范围 | 验证入口 |
+| --- | --- | --- |
+| `copyMakeBorder` | C1–C4 和已有 `Depth`。支持 CONSTANT、REPLICATE、REFLECT、REFLECT_101、WRAP。默认按孤立视图处理，显式父 ROI 可借用父图像素。 | `flagcv.{hip,nvidia}.border_threshold` 和 `tools/check_border_threshold.py` |
+| `threshold` | 五种固定模式，8U/16U/16S/32F/64F。Otsu 支持 U8/U16 C1，Triangle 支持 U8 C1。自动模式提供设备结果与返回主机值的同步入口。 | 同上，含独立 OpenCV CPU 及阈值返回值检查 |
+
+主题的设备和性能证据按实际平台与执行入口提交。FP32/FP64 参考采用固定 SSE3 OpenCV。

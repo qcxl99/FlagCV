@@ -81,3 +81,33 @@ batch pitch。每幅图可以使用独立于 packed width 的行 pitch。
 `cvtColor()`。同表族的转换可共享同一设备副本。调用方必须上传该表族的
 准确内容，并负责流之间的可见性和完成前的寿命。Lab 和逆向 Luv 需要
 8 字节对齐，其他表族需要 4 字节。无表族用空 workspace。
+
+### copyMakeBorder
+
+`copyMakeBorder` 接收预分配目标和非负的 `BorderExtents`。
+普通视图按 `BORDER_ISOLATED` 处理。需要 OpenCV 的父图像素时，传入
+`BorderParent{parent, x, y}`，其中坐标是源视图在同一 pitched 父图内的原点。
+运行时核对指针、类型、pitch 和范围，按每条边的可用像素扩展视图，再检查扩展视图
+和目标是否重叠。其余像素按所选边界计算。零边距且源目标完全相同可直接返回。
+常量按通道转换为目标深度。读取源像素的路径保留存储位，包括浮点的符号和载荷。
+本入口支持 C1–C4，拒绝 TRANSPARENT。
+
+### threshold
+
+`threshold` 返回固定阈值。整数模式返回向下取整的值，要求取整结果能表示为
+int32。浮点模式返回原 double。像素等于阈值时属于小于等于分支。
+`maxval` 对整数先按固定 CPU 的 int32 取偶舍入，然后按输出深度饱和。
+16S TRUNC 低于 `-32768` 时，返回原取整阈值并将像素置零。
+固定模式支持完全原地，拒绝部分重叠。dry-run 不需要目标，也不提交设备工作。
+
+`thresholdAuto` 使用调用方分配的 `ThresholdScratch{void*, bytes}`。
+用 `thresholdWorkspaceBytes` 查询最小尺寸，起始指针对齐到 int32。
+第一个 int32 保存有符号结果，后面是暂存直方图。调用方在流完成前独占这片可写内存，
+并与活跃源和目标字节范围分离。即使后续编译、提交或读回抛错，也必须保留之前已提交
+工作使用的 Handle、流和缓冲区直到完成。只读 `DeviceWorkspace` 继续用于上传表。
+自动 dry-run 仍提交直方图和阈值选择，省去目标 Kernel。
+
+`thresholdAutoHost` 在提交前检查 readback 能力。它等待所选原生流，然后进行
+厂商提供的阻塞 D2H。整个等待和 D2H 都属于公开调用耗时。原生阻塞复制可能带来的
+其他等待按设备实测记录。HIP 和 NVIDIA 提供该扩展，公开 Handle 和插件 V2 表
+保持原样。

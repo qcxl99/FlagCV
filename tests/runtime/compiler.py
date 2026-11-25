@@ -20,6 +20,12 @@ def compile(request):
         if actual != expected:
             raise ValueError(f"unexpected fp32 arguments: {actual}")
         width = "dst_w"
+    if request["kernel"] in ("copy_make_border", "threshold_apply", "threshold_histogram"):
+        width = "row_values"
+    elif request["kernel"] == "threshold_clear":
+        width = "bins"
+    elif request["kernel"] == "threshold_select":
+        width = "pixels"
     artifact = trace.with_suffix(".bin")
     artifact.write_bytes(b"fixture")
     return {"artifact": str(artifact), "function": function, "num_warps": 1, "shared": 0, "scratch_args": 0,

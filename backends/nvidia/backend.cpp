@@ -54,6 +54,13 @@ struct NvidiaApi {
     return cuLaunchKernel(fn, gx, gy, gz, block, 1, 1, shared,
                           static_cast<CUstream>(stream), args, nullptr);
   }
+  static Status stream_synchronize(void* stream) {
+    return cuStreamSynchronize(static_cast<CUstream>(stream));
+  }
+  static Status copy_to_host(void* host, const void* source, size_t size) {
+    return cuMemcpyDtoH(host, reinterpret_cast<CUdeviceptr>(source), size);
+  }
+
   static Status set_shared(Function fn, int bytes) {
     return cuFuncSetAttribute(
         fn, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, bytes);
@@ -110,4 +117,9 @@ struct NvidiaApi {
 extern "C" __attribute__((visibility("default"))) const FlagcvBackendV2*
 flagcv_backend_v2() {
   return flagcv::driver::table<NvidiaApi>();
+}
+
+extern "C" __attribute__((visibility("default"))) int
+flagcv_readback_v1(void* context, const void* source, void* host, size_t size, void* stream) {
+  return flagcv::driver::readback<NvidiaApi>(context, source, host, size, stream);
 }

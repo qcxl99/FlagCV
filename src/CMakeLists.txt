@@ -6,6 +6,8 @@ add_library(flagcv
   core/flip.cpp
   image/gpumat.cpp
   imgproc/cvtcolor.cpp
+  imgproc/copy_make_border.cpp
+  imgproc/threshold.cpp
   imgproc/resize.cpp
   imgproc/resize_tables.cpp
   imgproc/warpaffine.cpp

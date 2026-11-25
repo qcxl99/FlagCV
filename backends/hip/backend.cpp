@@ -52,6 +52,13 @@ struct HipApi {
                                  static_cast<hipStream_t>(stream), args,
                                  nullptr);
   }
+  static Status stream_synchronize(void* stream) {
+    return hipStreamSynchronize(static_cast<hipStream_t>(stream));
+  }
+  static Status copy_to_host(void* host, const void* source, size_t size) {
+    return hipMemcpy(host, source, size, hipMemcpyDeviceToHost);
+  }
+
   static Status set_shared(Function fn, int bytes) {
     return hipFuncSetAttribute(fn, hipFuncAttributeMaxDynamicSharedMemorySize,
                                bytes);
@@ -130,4 +137,9 @@ class Scope<HipApi> {
 extern "C" __attribute__((visibility("default"))) const FlagcvBackendV2*
 flagcv_backend_v2() {
   return flagcv::driver::table<HipApi>();
+}
+
+extern "C" __attribute__((visibility("default"))) int
+flagcv_readback_v1(void* context, const void* source, void* host, size_t size, void* stream) {
+  return flagcv::driver::readback<HipApi>(context, source, host, size, stream);
 }

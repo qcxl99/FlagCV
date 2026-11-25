@@ -115,6 +115,56 @@ HostTableData cvtColorTableData(ColorTables kind);
 void cvtColor(Handle& handle, const GpuMat& src, const GpuMat& dst, int code,
               DeviceWorkspace workspace = {}, Stream stream = nullptr);
 
+
+struct BorderExtents {
+  int top = 0;
+  int bottom = 0;
+  int left = 0;
+  int right = 0;
+};
+
+struct BorderParent {
+  GpuMat image;
+  int x = 0;
+  int y = 0;
+};
+
+// The source is isolated unless a matching parent and ROI origin are supplied.
+// The destination is preallocated and disjoint from the effective sampling view.
+void copyMakeBorder(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                    BorderExtents padding, Border border = Border::kConstant,
+                    const BorderValue& value = {}, const BorderParent* parent = nullptr,
+                    Stream stream = nullptr);
+
+enum class ThresholdMode { kBinary, kBinaryInv, kTrunc, kToZero, kToZeroInv };
+enum class AutomaticThreshold { kOtsu, kTriangle };
+
+// Fixed modes return the CPU-equivalent threshold without synchronizing the
+// device. Dry-run evaluates the return value without writing dst.
+double threshold(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                 double cutoff, double maxval, ThresholdMode mode,
+                 bool dry_run = false, Stream stream = nullptr);
+
+struct ThresholdScratch {
+  void* data = nullptr;
+  std::size_t bytes = 0;
+};
+
+std::size_t thresholdWorkspaceBytes(Depth depth, AutomaticThreshold method);
+
+// The first int32 in scratch receives the signed automatic threshold. Keep
+// the exclusive, disjoint scratch, images, handle and stream alive until
+// queued work has completed, including if a later step throws.
+void thresholdAuto(Handle& handle, const GpuMat& src, const GpuMat& dst, double maxval,
+                   ThresholdMode mode, AutomaticThreshold method, ThresholdScratch scratch,
+                   bool dry_run = false, Stream stream = nullptr);
+
+// Same operation with a synchronized host result. Waits for the chosen
+// stream, then performs the backend's blocking device-to-host readback.
+double thresholdAutoHost(Handle& handle, const GpuMat& src, const GpuMat& dst, double maxval,
+                         ThresholdMode mode, AutomaticThreshold method, ThresholdScratch scratch,
+                         bool dry_run = false, Stream stream = nullptr);
+
 }  // namespace flagcv
 
 #endif  // FLAGCV_IMGPROC_HPP_
