@@ -35,6 +35,15 @@ def identify():
 
 def compile(request):
     tuning, num_warps, grid, _ = compile_with_plan(request)
+    if request["target"] == "cuda:90:32" and not request["from_platform_registry"]:
+        source = request["images"][0]
+        if (request["kernel"] == "warp_affine_linear" and
+                source["depth"] == "8U" and source["channels"] == 3):
+            tuning["BLOCK_H"] = 2
+            grid[0]["block"] = 2
+        elif request["kernel"] == "resize_nearest" and source["channels"] in (1, 3):
+            tuning.update(BLOCK_H=1, BLOCK_W=256)
+            grid[0]["factor_blocks"] = [1, 256]
     params = {param["name"]: param for param in request["params"]}
     if not request["from_platform_registry"]:
         if params.get("PACKED", {}).get("value"):
