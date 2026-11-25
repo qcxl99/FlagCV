@@ -9,11 +9,13 @@ add_library(flagcv
   imgproc/resize.cpp
   imgproc/resize_tables.cpp
   imgproc/warpaffine.cpp
+  imgproc/projective.cpp
   lowering/flip.cpp
   lowering/pointwise.cpp
   lowering/cvtcolor.cpp
   lowering/resize.cpp
   lowering/warpaffine.cpp
+  lowering/projective.cpp
   runtime/compiler_client.cpp
   runtime/json.cpp
   runtime/paths.cpp

@@ -93,6 +93,34 @@ def plan_warp_affine(request, facts):
     return tuning, min(4, facts["max_warps"]), grid
 
 
+def plan_projective(request, facts):
+    # Row tiles keep output writes contiguous across the subgroup.
+    block, warps = 64, min(4, facts["max_warps"])
+    if request["backend"] == "hip" and request["target"].split(":")[1] == "gfx1100":
+        modes = {p["name"]: p["value"] for p in request["params"] if p["type"] == "constexpr"}
+        inter, border, channels = modes["INTER"], modes["BORDER"], modes["CN"]
+        layout = modes.get("LAYOUT", -1)
+        if inter == 2 and channels == 4 and border not in (0, 5):
+            block, warps = 256, 4
+        elif inter == 2 and channels != 1:
+            block, warps = 128, 4
+        elif inter == 1 and layout >= 2:
+            block, warps = 64, 2
+        elif inter == 1 and layout >= 0 and border == 5:
+            block, warps = 256, 4
+        elif inter == 0 and layout >= 0:
+            block, warps = 128, 4
+        else:
+            block, warps = 128, 2
+    col_limit = 65535 if facts["triton_backend"] in ("cuda", "hip") else 0
+    grid = [{"product": ["dst_h"], "block": 1},
+            {"product": ["dst_w"], "block": block}, 1]
+    if col_limit:
+        grid[1]["limit"] = col_limit
+        grid[2] = {"product": ["dst_w"], "block": block * col_limit}
+    return {"BLOCK": block, "COL_GRID_LIMIT": col_limit}, warps, grid
+
+
 def plan_resize(request, facts):
     area = request["kernel"] in ("resize_area", "resize_area_fast")
     block_h, block_w = (1, 64) if area else (2, 128)
@@ -129,6 +157,8 @@ PLANS = dict.fromkeys(
 )
 PLANS["flip"] = plan_flip
 PLANS["cvtcolor"] = plan_cvtcolor
+PLANS["warp_perspective"] = plan_projective
+PLANS["remap"] = plan_projective
 for mode in ("nearest", "linear", "cubic"):
     PLANS[f"warp_affine_{mode}"] = plan_warp_affine
 for route in ("copy", "nearest", "separable", "area", "area_fast"):
