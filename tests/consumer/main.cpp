@@ -66,6 +66,20 @@ int main() {
     check(cudaMemcpy(values.data(), dst.get(), 2, cudaMemcpyDeviceToHost));
     if (values[0] != 1 || values[1] != 3)
       throw std::runtime_error("installed resize returned incorrect output");
+    const int bgr_to_lab = 44;
+    const auto host_table = flagcv::cvtColorTableData(flagcv::cvtColorTableKind(bgr_to_lab));
+    const auto color_table = allocate(host_table.bytes);
+    check(cudaMemcpy(color_table.get(), host_table.data, host_table.bytes, cudaMemcpyHostToDevice));
+    const std::array<unsigned char, 3> black{};
+    check(cudaMemcpy(src.get(), black.data(), black.size(), cudaMemcpyHostToDevice));
+    const flagcv::GpuMat black_view(src.get(), 1, 1, flagcv::Depth::k8U, 3);
+    const flagcv::GpuMat lab_view(dst.get(), 1, 1, flagcv::Depth::k8U, 3);
+    flagcv::cvtColor(handle, black_view, lab_view, bgr_to_lab,
+                     {color_table.get(), host_table.bytes});
+    std::array<unsigned char, 3> lab{};
+    check(cudaMemcpy(lab.data(), dst.get(), lab.size(), cudaMemcpyDeviceToHost));
+    if (lab != std::array<unsigned char, 3>{0, 128, 128})
+      throw std::runtime_error("installed cvtColor returned incorrect output");
     return 0;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
@@ -77,7 +91,8 @@ int main() {
   const flagcv::GpuMat view(nullptr, 4, 2, flagcv::Depth::k16U, 3);
   const flagcv::ResizePlan plan({4, 2}, flagcv::Depth::k8U, 1,
                                {{2, 1}, 0, 0, flagcv::Interpolation::kNearest});
-  return view.row_pitch() == 24 && view.row_stride() == 12 &&
+  const auto table = flagcv::cvtColorTableData(flagcv::ColorTables::kLabLuvReverse);
+  return table.bytes != 0 && view.row_pitch() == 24 && view.row_stride() == 12 &&
              plan.destination_size().width == 2 && plan.table_bytes() != 0 ? 0 : 1;
 }
 #endif

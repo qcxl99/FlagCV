@@ -40,6 +40,16 @@ function(flagcv_add_resize_test target backend runtime)
   set_tests_properties(flagcv.${backend}.resize PROPERTIES LABELS "${backend};gpu" TIMEOUT 420)
 endfunction()
 
+function(flagcv_add_cvtcolor_test target backend runtime)
+  add_executable(${target} cpp/test_cvtcolor.cpp)
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  target_link_libraries(${target} PRIVATE flagcv opencv_core opencv_imgproc ${runtime})
+  target_compile_features(${target} PRIVATE cxx_std_17)
+  flagcv_enable_warnings(${target})
+  add_test(NAME flagcv.${backend}.cvtcolor COMMAND ${target})
+  set_tests_properties(flagcv.${backend}.cvtcolor PROPERTIES LABELS "${backend};gpu" TIMEOUT 420)
+endfunction()
+
 option(FLAGCV_TEST_NVIDIA "Run public C++ API tests with NVIDIA and OpenCV CPU" OFF)
 set(FLAGCV_TEST_NVIDIA_DEVICES "1" CACHE STRING "Number of visible NVIDIA test devices")
 
@@ -83,6 +93,7 @@ if(FLAGCV_TEST_NVIDIA)
   set_tests_properties(flagcv.nvidia.warpaffine PROPERTIES LABELS "nvidia;gpu" TIMEOUT 420)
 
   flagcv_add_resize_test(flagcv_test_resize nvidia CUDA::cudart)
+  flagcv_add_cvtcolor_test(flagcv_test_cvtcolor nvidia CUDA::cudart)
 
   set(overlay "${CMAKE_CURRENT_BINARY_DIR}/nvidia-test-data")
   file(MAKE_DIRECTORY "${overlay}/backends/nvidia/kernels")
@@ -121,6 +132,8 @@ if(FLAGCV_TEST_HIP)
 
   flagcv_add_resize_test(flagcv_test_resize_hip hip hip::host)
   target_compile_definitions(flagcv_test_resize_hip PRIVATE FLAGCV_TEST_HIP=1)
+  flagcv_add_cvtcolor_test(flagcv_test_cvtcolor_hip hip hip::host)
+  target_compile_definitions(flagcv_test_cvtcolor_hip PRIVATE FLAGCV_TEST_HIP=1)
 
   add_executable(flagcv_test_hip cpp/test_nvidia.cpp)
   target_include_directories(flagcv_test_hip PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

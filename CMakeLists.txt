@@ -47,6 +47,10 @@ install(DIRECTORY compiler/
   DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/compiler"
   FILES_MATCHING PATTERN "*.py" PATTERN "__pycache__" EXCLUDE)
 
+install(DIRECTORY tables/cvtcolor/
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/tables/cvtcolor"
+  FILES_MATCHING PATTERN "*.bin")
+
 configure_package_config_file(
   cmake/FlagCVConfig.cmake.in
   "${CMAKE_CURRENT_BINARY_DIR}/FlagCVConfig.cmake"

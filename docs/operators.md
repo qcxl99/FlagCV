@@ -12,6 +12,7 @@
 | `bitwise_and` | 全部 `Depth`，含浮点存储位；可选 mask，允许原地 | 8U | 公开 API、Python、OpenCV CUDA 逐例基线 | Core 位运算维护者 |
 | `bitwise_not` | 全部 `Depth`，含浮点存储位；可选 mask，允许原地 | 8U | 公开 API、Python、OpenCV CUDA 逐例基线 | Core 位运算维护者 |
 | `flip` | 全部 `Depth`，逐位搬运；正、零、负方向，允许原地 | 8U/32F，三种方向 | 公开 API、Python、OpenCV CUDA 逐例基线 | Core 几何维护者 |
+| `cvtColor` | 84 个 8U、20 个 16U、20 个 32F code-depth 组合，通道、视频尺寸与拒绝继承 contrib | 原四种 8U 已纳入，共用 kernel | H20 公开 API 正确性，性能验收待补 | Imgproc 颜色维护者 |
 | `resize` | 8U/32F C1/C3/C4 单图，8U C1/C3/C4 批量，四种插值，比例或指定尺寸，预备表与独立 pitch | 性能验收待补 | H20 公开 API 正确性，性能验收待补 | Imgproc 几何维护者 |
 | `warpAffine` | 8U/16U/32F，C1/C3/C4，独立 pitch 与 ROI；目标尺寸取自 dst；正向或逆向 2×3 矩阵；禁止重叠 | 独立 Python 性能验收待补 | H20 公开 API 正确性切片；性能验收待补 | Imgproc 几何维护者 |
 
@@ -37,6 +38,6 @@ CUDA 逐例基线覆盖已核对的共同支持范围。16F、C++ 掩码、原�
 | --- | --- | --- |
 | 1 | `bitwise_or`、`bitwise_xor`、`compare`、`min`、`max` | OR/XOR/min/max 有独立评测 PR 提案；公开 API 和验收待接入 |
 | 2 | `warpPerspective`、`remap` | 优先复用已有 Triton 和 OpenCV 工作；按插值及边界模式建立 CPU 和 CUDA 基线 |
-| 3 | `cvtColor`、`GaussianBlur`、`filter2D`、`threshold` | 先登记支持的转换代码、通道、边界策略和参考样本；`cvtColor` 为性能重点 |
+| 3 | `GaussianBlur`、`filter2D`、`threshold` | 按边界策略和采样规则建立参考样本 |
 
 AMD 新工具链与新设备继续按 HIP 交付流程验证。[AMD PR #3](https://github.com/flagos-ai/FlagCV/pull/3)

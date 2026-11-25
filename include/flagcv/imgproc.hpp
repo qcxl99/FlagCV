@@ -89,6 +89,32 @@ void resizeBatch(Handle& handle, const GpuMat& src, const GpuMat& dst,
                  const ResizePlan& plan, DeviceWorkspace workspace = {},
                  Stream stream = nullptr);
 
+// Table families are shareable by every code that names the same family.
+enum class ColorTables { kNone, kHsv, kHsvFull, kLabLuvReverse, kLuvForward };
+
+struct HostTableData {
+  const void* data;
+  std::size_t bytes;
+};
+
+struct ColorOutput {
+  Size size;
+  int channels;
+};
+
+// OpenCV numeric codes with their original output channel count and depth.
+ColorOutput cvtColorOutput(Size source, Depth depth, int channels, int code);
+ColorTables cvtColorTableKind(int code);
+HostTableData cvtColorTableData(ColorTables kind);
+
+/*
+ * Upload the exact payload for cvtColorTableKind(code) before first use.
+ * The caller owns the device copy, its stream visibility and its lifetime.
+ * A table-free conversion takes an empty workspace.
+ */
+void cvtColor(Handle& handle, const GpuMat& src, const GpuMat& dst, int code,
+              DeviceWorkspace workspace = {}, Stream stream = nullptr);
+
 }  // namespace flagcv
 
 #endif  // FLAGCV_IMGPROC_HPP_

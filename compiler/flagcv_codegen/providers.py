@@ -109,6 +109,17 @@ def plan_resize(request, facts):
     return tuning, min(4, facts["max_warps"]), grid
 
 
+def plan_cvtcolor(request, facts):
+    block = 128
+    col_limit = 65535 if facts["triton_backend"] in ("cuda", "hip") else 0
+    grid = [{"product": ["rows"], "block": 1},
+            {"product": ["cols"], "block": block}, 1]
+    if col_limit:
+        grid[1]["limit"] = col_limit
+        grid[2] = {"product": ["cols"], "block": col_limit * block}
+    return {"BLOCK": block, "COL_GRID_LIMIT": col_limit}, min(4, facts["max_warps"]), grid
+
+
 PLANS = dict.fromkeys(
     (
         "add", "subtract", "multiply", "bitwise_and", "bitwise_not",
@@ -117,6 +128,7 @@ PLANS = dict.fromkeys(
     plan_pointwise,
 )
 PLANS["flip"] = plan_flip
+PLANS["cvtcolor"] = plan_cvtcolor
 for mode in ("nearest", "linear", "cubic"):
     PLANS[f"warp_affine_{mode}"] = plan_warp_affine
 for route in ("copy", "nearest", "separable", "area", "area_fast"):

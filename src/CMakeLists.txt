@@ -5,11 +5,13 @@ add_library(flagcv
   core/bitwise.cpp
   core/flip.cpp
   image/gpumat.cpp
+  imgproc/cvtcolor.cpp
   imgproc/resize.cpp
   imgproc/resize_tables.cpp
   imgproc/warpaffine.cpp
   lowering/flip.cpp
   lowering/pointwise.cpp
+  lowering/cvtcolor.cpp
   lowering/resize.cpp
   lowering/warpaffine.cpp
   runtime/compiler_client.cpp

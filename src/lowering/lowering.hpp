@@ -107,6 +107,9 @@ LoweredOp lower_resize(const GpuMat& src, const GpuMat& dst, const ResizePlan& p
                         DeviceWorkspace workspace, int count,
                         std::int64_t src_pitch, std::int64_t dst_pitch, bool batch);
 
+LoweredOp lower_cvtcolor(const GpuMat& src, const GpuMat& dst, int code,
+                          DeviceWorkspace workspace);
+
 }  // namespace flagcv
 
 #endif  // FLAGCV_SRC_LOWERING_LOWERING_HPP_

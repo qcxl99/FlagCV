@@ -90,6 +90,11 @@
       "name": "resize_area",
       "source": "common/resize.py",
       "function": "_resize_cpu_area_kernel"
+    },
+    {
+      "name": "cvtcolor",
+      "source": "common/cvtcolor.py",
+      "function": "_cvtcolor_cpu_kernel"
     }
   ]
 }
