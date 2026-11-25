@@ -116,6 +116,18 @@ void check_cubic_constant_fringe(flagcv::Handle& handle, const Stream& stream) {
                                      AffineMatrix{0, 0, 0, 0, 0, -2.2}}) {
     run_case(handle, stream, CV_32FC1, {4, 4}, {37, 1}, matrix, cubic, constant, {10000}, true);
   }
+  for (const AffineMatrix& matrix : {AffineMatrix{1, 0, -3.2, 0, 1, 0},
+                                     AffineMatrix{1, 0, 0, 1, 1, -3.2}}) {
+    run_case(handle, stream, CV_32FC1, {4, 4}, {37, 1}, matrix, cubic, constant, {10000}, true);
+  }
+  for (int width : {5, 65, 133}) {
+    const AffineMatrix tail{1, 0, -(width - 1) - 2.2, 0, 1, 0};
+    run_case(handle, stream, CV_32FC1, {4, 4}, {width, 1}, tail, cubic, constant, {10000}, true);
+  }
+  for (int width : {1, 3, 129, 130, 131}) {
+    const AffineMatrix padded{0, 0, -3.2, 0, 1, 0};
+    run_case(handle, stream, CV_32FC1, {4, 4}, {width, 1}, padded, cubic, constant, {10000}, true);
+  }
 }
 
 template<class Call>

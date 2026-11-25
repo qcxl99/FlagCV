@@ -294,6 +294,36 @@ def _bicubic_weights_t(a, FUSED: tl.constexpr):
 
 
 @triton.jit
+def _cubic_outlier(ix0, iy0, src_w, src_h):
+    # Match OpenCV bicubicCoeffs' unsigned bounds on origin + 4.
+    # Compare the upper bound directly to preserve large source extents.
+    return (ix0 >= src_w) | (ix0 + 4 < 0) | (iy0 >= src_h) | (iy0 + 4 < 0)
+
+
+@triton.jit
+def _cubic_constant_group(xs, dst_w, row_x, row_y, M00, M10, bigw, bigh, src_w, src_h):
+    # The fixed SSE3 CPU processes four pixels per SIMD group in a
+    # 128-column genericWarp chunk. Its last full group may overwrite
+    # some pixels of the previous group. Chunks shorter than four pad
+    # missing lanes with coordinates (0, 0), which prevents the shortcut.
+    chunk_tail = dst_w % 128
+    padded_tail = (chunk_tail > 0) & (chunk_tail < 4)
+    aligned_start = xs // 4 * 4
+    group_start = tl.where(padded_tail, aligned_start, tl.minimum(aligned_start, dst_w - 4))
+    group_outside = group_start + 3 < dst_w
+    for peer in tl.static_range(4):
+        peer_x = (group_start + peer).to(tl.float32)
+        sx = row_x + peer_x * M00
+        sy = row_y + peer_x * M10
+        sx = tl.minimum(tl.maximum(sx, -bigw), 2.0 * bigw)
+        sy = tl.minimum(tl.maximum(sy, -bigh), 2.0 * bigh)
+        ix0 = tl.floor(sx).to(tl.int64) - 1
+        iy0 = tl.floor(sy).to(tl.int64) - 1
+        group_outside = group_outside & _cubic_outlier(ix0, iy0, src_w, src_h)
+    return group_outside
+
+
+@triton.jit
 def _warp_cubic(src_ptr, dst_ptr, M00, M01, M02, M10, M11, M12, src_h, src_w, dst_h, dst_w,
                 src_rs, dst_rs, bv0, bv1, bv2, bv3,
                 cn: tl.constexpr, U8: tl.constexpr, U16: tl.constexpr,
@@ -330,10 +360,10 @@ def _warp_cubic(src_ptr, dst_ptr, M00, M01, M02, M10, M11, M12, src_h, src_w, ds
     sy = (row_y + (xf * M10.to(tl.float32)))
 
     # bicubicCoeffs' float clamp before the floor: bigwidth = max(size, 16)
-    bigw = tl.maximum(src_w, 16)
-    bigh = tl.maximum(src_h, 16)
-    sx = tl.minimum(tl.maximum(sx, -bigw.to(tl.float32)), 2.0 * bigw.to(tl.float32))
-    sy = tl.minimum(tl.maximum(sy, -bigh.to(tl.float32)), 2.0 * bigh.to(tl.float32))
+    bigw = tl.maximum(src_w, 16).to(tl.float32)
+    bigh = tl.maximum(src_h, 16).to(tl.float32)
+    sx = tl.minimum(tl.maximum(sx, -bigw), 2.0 * bigw)
+    sy = tl.minimum(tl.maximum(sy, -bigh), 2.0 * bigh)
 
     fx = tl.floor(sx)
     fy = tl.floor(sy)
@@ -344,10 +374,11 @@ def _warp_cubic(src_ptr, dst_ptr, M00, M01, M02, M10, M11, M12, src_h, src_w, ds
     wx0, wx1, wx2, wx3 = _bicubic_weights_t(ax, FUSED)
     wy0, wy1, wy2, wy3 = _bicubic_weights_t(ay, FUSED)
 
-    # Match OpenCV bicubicCoeffs' unsigned bounds on origin + 4. The
-    # origin at -4 stays in its weighted path even when every tap is outside.
-    # Compare the upper bound directly so a source extent near INT_MAX stays valid.
-    all_out = (ix0 >= src_w) | (ix0 + 4 < 0) | (iy0 >= src_h) | (iy0 + 4 < 0)
+    if BORDER == 0:
+        all_out = _cubic_constant_group(xs, dst_w, row_x, row_y, M00, M10,
+                                        bigw, bigh, src_w, src_h)
+    elif TRANSPARENT:
+        all_out = _cubic_outlier(ix0, iy0, src_w, src_h)
 
     wx = (wx0, wx1, wx2, wx3)
     wy = (wy0, wy1, wy2, wy3)
