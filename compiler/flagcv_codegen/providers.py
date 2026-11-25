@@ -120,6 +120,12 @@ def plan_cvtcolor(request, facts):
     return {"BLOCK": block, "COL_GRID_LIMIT": col_limit}, min(4, facts["max_warps"]), grid
 
 
+def plan_spatial_filter(request, facts):
+    block = 128
+    grid = [{"product": ["width", "height", "CHANNELS"], "block": block}, 1, 1]
+    return {"BLOCK": block}, min(4, facts["max_warps"]), grid
+
+
 PLANS = dict.fromkeys(
     (
         "add", "subtract", "multiply", "bitwise_and", "bitwise_not",
@@ -129,6 +135,9 @@ PLANS = dict.fromkeys(
 )
 PLANS["flip"] = plan_flip
 PLANS["cvtcolor"] = plan_cvtcolor
+for route in ("direct", "horizontal", "vertical"):
+    PLANS[f"gaussian_{route}"] = plan_spatial_filter
+PLANS["filter2d_direct"] = plan_spatial_filter
 for mode in ("nearest", "linear", "cubic"):
     PLANS[f"warp_affine_{mode}"] = plan_warp_affine
 for route in ("copy", "nearest", "separable", "area", "area_fast"):

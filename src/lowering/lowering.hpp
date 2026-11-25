@@ -7,6 +7,7 @@
 
 #include "src/image/types.hpp"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -109,6 +110,14 @@ LoweredOp lower_resize(const GpuMat& src, const GpuMat& dst, const ResizePlan& p
 
 LoweredOp lower_cvtcolor(const GpuMat& src, const GpuMat& dst, int code,
                           DeviceWorkspace workspace);
+
+LoweredOp lower_gaussian(const GpuMat& src, const GpuMat& dst,
+                         const GaussianPlan& plan, DeviceWorkspace workspace);
+std::array<LoweredOp, 2> lower_gaussian_separable(
+    const GpuMat& src, const GpuMat& dst, const GaussianPlan& plan,
+    DeviceWorkspace workspace, const GpuMat& scratch);
+LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
+                         const Filter2DPlan& plan, DeviceWorkspace workspace);
 
 }  // namespace flagcv
 

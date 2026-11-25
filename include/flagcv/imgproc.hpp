@@ -8,6 +8,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 
 /*
  * Colour conversion, geometric transforms, filtering, morphology,
@@ -114,6 +115,73 @@ HostTableData cvtColorTableData(ColorTables kind);
  */
 void cvtColor(Handle& handle, const GpuMat& src, const GpuMat& dst, int code,
               DeviceWorkspace workspace = {}, Stream stream = nullptr);
+
+struct GaussianOptions {
+  Size kernel;
+  double sigma_x = 0;
+  double sigma_y = 0;
+  Border border = Border::kReflect101;
+};
+
+// The prepared Gaussian is fixed to source size and depth. Axes are odd and
+// at most 65535. A nonpositive axis with positive sigma selects the
+// OpenCV-derived size. A nonpositive sigma_y inherits sigma_x. Integer U8/U16
+// use the fixed CPU quantization and rounding.
+class GaussianPlan {
+ public:
+  GaussianPlan(Size source, Depth depth, GaussianOptions options);
+  Size kernel_size() const;
+  Depth scratch_depth() const;
+  HostTableData table() const;
+
+ private:
+  struct Data;
+  std::shared_ptr<const Data> data_;
+  friend struct SpatialFilterAccess;
+};
+
+struct FilterAnchor {
+  int x = -1;
+  int y = -1;
+};
+
+struct Filter2DOptions {
+  std::optional<Depth> ddepth;
+  FilterAnchor anchor{};
+  double delta = 0;
+  Border border = Border::kReflect101;
+};
+
+// Copies a row-major coefficient matrix. The operation is direct
+// correlation, including for large kernels. An absent ddepth preserves the
+// source depth, and -1 in either axis of the anchor selects that axis's center.
+class Filter2DPlan {
+ public:
+  Filter2DPlan(Size kernel, const double* coefficients, Depth source,
+               Filter2DOptions options = {});
+  HostTableData table() const;
+
+ private:
+  struct Data;
+  std::shared_ptr<const Data> data_;
+  friend struct SpatialFilterAccess;
+};
+
+// Both filters use the ROI as an isolated image, support 1–4 packed channels
+// and require disjoint input/output pixels. The caller uploads the plan table
+// to aligned immutable device workspace and orders it before submitting.
+void GaussianBlur(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                  const GaussianPlan& plan, DeviceWorkspace workspace,
+                  Stream stream = nullptr);
+// The two-pass overload uses a writable scratch image of the source size and
+// channel count, with scratch_depth(). Keep it disjoint from both images and
+// the coefficient workspace. The two launches are ordered on stream.
+void GaussianBlur(Handle& handle, const GpuMat& src, const GpuMat& dst,
+                  const GaussianPlan& plan, DeviceWorkspace workspace,
+                  const GpuMat& scratch, Stream stream = nullptr);
+void filter2D(Handle& handle, const GpuMat& src, const GpuMat& dst,
+              const Filter2DPlan& plan, DeviceWorkspace workspace,
+              Stream stream = nullptr);
 
 }  // namespace flagcv
 

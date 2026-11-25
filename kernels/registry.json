@@ -95,6 +95,26 @@
       "name": "cvtcolor",
       "source": "common/cvtcolor.py",
       "function": "_cvtcolor_cpu_kernel"
+    },
+    {
+      "name": "gaussian_direct",
+      "source": "common/spatial_filters.py",
+      "function": "gaussian_direct"
+    },
+    {
+      "name": "gaussian_horizontal",
+      "source": "common/spatial_filters.py",
+      "function": "gaussian_horizontal"
+    },
+    {
+      "name": "gaussian_vertical",
+      "source": "common/spatial_filters.py",
+      "function": "gaussian_vertical"
+    },
+    {
+      "name": "filter2d_direct",
+      "source": "common/spatial_filters.py",
+      "function": "filter2d_direct"
     }
   ]
 }
