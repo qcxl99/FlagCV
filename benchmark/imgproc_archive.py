@@ -34,7 +34,7 @@ def add_row(rows, key, row):
     rows[key] = row
 
 
-def normalize(raw_class, ratios, relative, source, background=None):
+def normalize(raw_class, ratios, relative, source, background=None, record=None):
     if raw_class not in CLASSES.values():
         raise ValueError(f"unknown archive classification: {raw_class}")
     formal = {}
@@ -46,6 +46,23 @@ def normalize(raw_class, ratios, relative, source, background=None):
             formal[metric] = value
     result = dict(classification=raw_class, formal_ratios=formal or None,
                   evidence=relative, source=source)
+    cpu = "fail" if raw_class == "candidate_cpu_diff" else "pass"
+    baseline = {
+        "comparable": "matches_cpu",
+        "semantic_diagnostic": "differs_from_cpu",
+        "unsupported": "refused",
+        "layout_diagnostic": "changed_layout",
+        "candidate_cpu_diff": "not_run",
+    }[raw_class]
+    result.update(cpu_reference={"status": cpu},
+                  opencv_cuda={"status": baseline})
+    if record:
+        if record.get("error"):
+            result["opencv_cuda"]["diagnostic"] = record["error"]
+        for name in ("return_contract", "event_us", "native_sync_wall_us", "median",
+                     "flagcv_us", "opencv_cuda_us", "sample_extent"):
+            if name in record:
+                result[name] = record[name]
     if raw_class == "comparable" and not formal:
         result["qualification"] = "matching_output_without_comparable_timing"
     if background:
@@ -66,7 +83,7 @@ def read_first_batch(payload, relative):
             add_row(target, row["id"], normalize(
                 record["class"], metrics, relative, row.get(f"{side}_measurement_source"),
                 list(record.get("candidate_only", {}).get("candidate_samples_us",
-                                                         record.get("candidate_only", {})))))
+                                                         record.get("candidate_only", {}))), record))
     return entries
 
 
@@ -105,8 +122,7 @@ def read_cpp_group(group_id, payload):
     return summary["cpp"]["rows"] if group_id == "arithmetic-filters" else summary["rows"]
 
 
-def read_group(group, root):
-    payloads = {name: read_bound(root, name, sha) for name, sha in group["files"].items()}
+def read_group(group, payloads):
     if "shared" in group:
         path = group["shared"]
         return read_first_batch(payloads[path], path)
@@ -124,7 +140,7 @@ def read_group(group, root):
                 metrics = {"event": row["ratio"]}
             add_row(entries["cpp"], row["case"], normalize(
                 CLASSES[row["classification"]], metrics, cpp, group["source"],
-                ["repeat", "reset_included"] if row["case"] in resets else None))
+                ["repeat", "reset_included"] if row["case"] in resets else None, row))
     for path in group["python"]:
         if payloads[path] is None:
             continue
@@ -132,7 +148,7 @@ def read_group(group, root):
             metrics = {"event": row["ratio"]} if row.get("ratio") is not None else {}
             add_row(entries["python"], row["id"], normalize(
                 CLASSES[row["classification"]], metrics, path, group["source"],
-                ["repeat", "reset_included"] if "reset_included" in row else None))
+                ["repeat", "reset_included"] if "reset_included" in row else None, row))
     return entries
 
 
@@ -141,12 +157,28 @@ def load_archive(root):
         raise ValueError("archive root must be a directory")
     manifest_bytes = MANIFEST.read_bytes()
     manifest = json.loads(manifest_bytes)
-    if manifest["schema"] != "flagcv-imgproc-archive/1":
+    if manifest["schema"] != "flagcv-imgproc-archive/2":
         raise ValueError("unsupported Imgproc archive schema")
     results = []
     counts = defaultdict(lambda: defaultdict(int))
+    original_jobs = {}
     for group in manifest["groups"]:
-        rows = read_group(group, root)
+        payloads = {name: read_bound(root, name, sha) for name, sha in group["files"].items()}
+        rows = read_group(group, payloads)
+        group_id = group["id"]
+        original_jobs[group_id] = {}
+        missing = {}
+        for side in ENTRIES:
+            jobs = {}
+            for path in group["jobs"][side]:
+                if payloads[path] is not None:
+                    job = json.loads(payloads[path])
+                    if job["gpu_uuid"] != group["gpu"] or job["status"] != 0:
+                        raise ValueError(f"invalid original job identity: {path}")
+                    jobs[path] = job
+            original_jobs[group_id][side] = jobs
+            missing[side] = [path for path in group["jobs"][side] + group["original_samples"][side]
+                             if payloads[path] is None]
         for side in ENTRIES:
             ids = {item[side] for item in group["cases"]}
             if len(ids) != len(group["cases"]) or not rows[side].keys() <= ids:
@@ -154,12 +186,17 @@ def load_archive(root):
         for item in group["cases"]:
             for side in ENTRIES:
                 case = item[side]
-                observation = rows[side].get(case, {"classification": "missing", "formal_ratios": None})
+                observation = rows[side].get(case, {"classification": "missing", "formal_ratios": None,
+                                                     "cpu_reference": {"status": "missing"},
+                                                     "opencv_cuda": {"status": "missing"}})
+                if missing[side] and observation["classification"] != "missing":
+                    observation["missing_original_evidence"] = missing[side]
+                    observation["formal_ratios"] = None
                 counts[side][observation["classification"]] += 1
                 results.append(dict(case=case, group=group["id"], operator=item["operator"],
                                     entry=side, physical_gpu=group["gpu"], parameters=item.get("parameters"),
                                     **observation))
-    return dict(schema="flagcv-imgproc-archive-summary/1", scope="archived",
+    return dict(schema="flagcv-imgproc-archive-summary/2", scope="archived",
                 manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
                 archived_inputs={group["id"]:group["files"] for group in manifest["groups"]},
-                counts=counts, rows=results)
+                original_jobs=original_jobs, counts=counts, rows=results)

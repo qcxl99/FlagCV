@@ -1,11 +1,55 @@
-{"schema": "flagcv-imgproc-archive/1", "groups": [
+{"schema": "flagcv-imgproc-archive/2", "groups": [
 {
   "id": "first-batch",
   "gpu": "GPU-17c4897b-c1c9-e326-1f0b-863af1ad4ff7",
   "source": null,
   "shared": "flagcv-imgproc-stage1-perf-h20/stage1-scope-classification-final.json",
   "files": {
-    "flagcv-imgproc-stage1-perf-h20/stage1-scope-classification-final.json": "e6fa45ae2b3c1bcfd6a04c6ca357bd8403ee8255f366dcb680c0aceb68c9c243"
+    "flagcv-imgproc-stage1-perf-h20/stage1-scope-classification-final.json": "e6fa45ae2b3c1bcfd6a04c6ca357bd8403ee8255f366dcb680c0aceb68c9c243",
+    "flagcv-imgproc-stage1-perf-h20/cpp-production-matrix.json": "ce7be1b7245a405cd028d0f42e9fe7fde581fdd1f663bdd70ad0f2dd4448398f",
+    "flagcv-imgproc-stage1-perf-h20/cpp-scope-supplement-h20.json": "165c7a8d55888a25150f6161c4ffa19a85f4f5525687beaa2184107e97466f89",
+    "flagcv-imgproc-stage1-perf-h20/tuned-affected-h20.json": "588596cd073140a3cd55783dcd0c42f798ad8e85d87cbec4c56b33245584fa9f",
+    "flagcv-imgproc-stage1-perf-h20/cpp-production-matrix.log": "7eb8fb1537928da3a16feee588ce7606b1436d26f471aff8c5926037434373f6",
+    "flagcv-imgproc-stage1-perf-h20/cpp-scope-backfill.log": "2d10845e265be3e0d07a1d4abd2e3c91af8cf8934a91d31aeba807c0cde53c5f",
+    "flagcv-imgproc-stage1-perf-h20/cpp-candidate-only.log": "f768cc819fd9d701db46e10e79c7625733dd9ac24f6354ad5cf0c0916c95e28d",
+    "flagcv-imgproc-stage1-perf-h20/cpp-output-recheck.log": "4c5f7edbd9828813e586a58b15bbfd559eee210caf0a3771110e2f54f86d1322",
+    "flagcv-imgproc-stage1-perf-h20/cpp-tuned-affected.log": "1e61ed5e0344b11658e010b384ca4f5843f24d9caf19c38f1b5dabc213f93db6",
+    "flagcv-imgproc-stage1-perf-h20/python-production-matrix.json": "5be71532ac2dc645923a2fa3febbabc97178964b61f755ce05d742ae01593c17",
+    "flagcv-imgproc-stage1-perf-h20/python-scope-supplement-h20.json": "84287891617a89b86077097d38b97375b87a0d700bdf2f69e833007432728955",
+    "flagcv-imgproc-stage1-perf-h20/python-candidate-only-h20.json": "b1f3b6143c09319000a42c9bed5798f9a04acc43d31b0ca528fa9b7031830f0a",
+    "flagcv-imgproc-stage1-perf-h20/python-production-matrix.log": "276990eae217719d50e04197fbbbc3d81bb767f1d80e14c111e40fddc6fe83c1",
+    "flagcv-imgproc-stage1-perf-h20/python-scope-backfill.log": "2ba526db45785ac01e3121311e8eec7b4eddd3fec9da7aeab7ab4fd9ccc3b0dd",
+    "flagcv-imgproc-stage1-perf-h20/python-candidate-only-h20.log": "c5f3804023751ac8bbad18731b26d187359770b477a6e21ccc98b99e4ad333d3",
+    "flagcv-imgproc-stage1-perf-h20/python-output-recheck.log": "b62ee541ab8566e1d4dd09d4db1f6df072d0b13c4355111cf85834e08b9541e9",
+    "flagcv-imgproc-stage1-perf-h20/python-tuned-affected.log": "2f2ce92417bd3247b830a0b330d672852b9eb74019dab684ab8b46948fbaed99"
+  },
+  "jobs": {
+    "cpp": [
+      "flagcv-imgproc-stage1-perf-h20/cpp-production-matrix.json",
+      "flagcv-imgproc-stage1-perf-h20/cpp-scope-supplement-h20.json",
+      "flagcv-imgproc-stage1-perf-h20/tuned-affected-h20.json"
+    ],
+    "python": [
+      "flagcv-imgproc-stage1-perf-h20/python-production-matrix.json",
+      "flagcv-imgproc-stage1-perf-h20/python-scope-supplement-h20.json",
+      "flagcv-imgproc-stage1-perf-h20/python-candidate-only-h20.json"
+    ]
+  },
+  "original_samples": {
+    "cpp": [
+      "flagcv-imgproc-stage1-perf-h20/cpp-production-matrix.log",
+      "flagcv-imgproc-stage1-perf-h20/cpp-scope-backfill.log",
+      "flagcv-imgproc-stage1-perf-h20/cpp-candidate-only.log",
+      "flagcv-imgproc-stage1-perf-h20/cpp-output-recheck.log",
+      "flagcv-imgproc-stage1-perf-h20/cpp-tuned-affected.log"
+    ],
+    "python": [
+      "flagcv-imgproc-stage1-perf-h20/python-production-matrix.log",
+      "flagcv-imgproc-stage1-perf-h20/python-scope-backfill.log",
+      "flagcv-imgproc-stage1-perf-h20/python-candidate-only-h20.log",
+      "flagcv-imgproc-stage1-perf-h20/python-output-recheck.log",
+      "flagcv-imgproc-stage1-perf-h20/python-tuned-affected.log"
+    ]
   },
   "cases": [
     {"operator":"resize","cpp":"resize-0000","python":"resize-0000","parameters":{"op":"resize","sw":1280,"sh":720,"dw":640,"dh":360,"depth":"8U","channels":1,"mode":0,"code":-1,"geometry":0,"border":0,"fx":0,"fy":0}},
@@ -822,7 +866,33 @@
     "flagcv-h20-stage2-native-baselines/geometry-small-shard-04.jsonl": "5a5a3cbb67e15c9fa4d8e2a139edf53a9523273c02281106712ddf30228ed87c",
     "flagcv-h20-stage2-native-baselines/geometry-small-shard-05.jsonl": "4d00b4beb468adb19ef01fdfcfd268f9ba546c38802e30a00b3c4c4948875fa1",
     "flagcv-h20-stage2-native-baselines/geometry-small-shard-06.jsonl": "8e943e540aba73b91efd9f46d6eb0249d7cfe48750c17d8fbe5510cb9865fa3c",
-    "flagcv-h20-stage2-native-baselines/geometry-small-shard-07.jsonl": "a005c5438d114c12de811baa1c49a19f9b1126d34908119e2f89b778f01befbe"
+    "flagcv-h20-stage2-native-baselines/geometry-small-shard-07.jsonl": "a005c5438d114c12de811baa1c49a19f9b1126d34908119e2f89b778f01befbe",
+    "flagcv-h20-stage2-native-baselines/geometry-cpp-small-h20.json": "2bad1e68276c206a85e5771663f6a558030f0b908d52e75ccb5db7c8015d9d80",
+    "flagcv-h20-stage2-native-baselines/geometry-cpp-small-h20.log": "8c1579eb28d122888962a48090adba432823fc433947ff9c0d79c20146fa266c",
+    "flagcv-h20-stage2-native-baselines/geometry-python-small-h20.json": "f01c7878e76a5922e7fa4ae58297a252f0e87bd3b8d43e74c6bf3dd7445974a0"
+  },
+  "jobs": {
+    "cpp": [
+      "flagcv-h20-stage2-native-baselines/geometry-cpp-small-h20.json"
+    ],
+    "python": [
+      "flagcv-h20-stage2-native-baselines/geometry-python-small-h20.json"
+    ]
+  },
+  "original_samples": {
+    "cpp": [
+      "flagcv-h20-stage2-native-baselines/geometry-cpp-small-h20.log"
+    ],
+    "python": [
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-00.jsonl",
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-01.jsonl",
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-02.jsonl",
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-03.jsonl",
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-04.jsonl",
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-05.jsonl",
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-06.jsonl",
+      "flagcv-h20-stage2-native-baselines/geometry-small-shard-07.jsonl"
+    ]
   },
   "cases": [
     {"operator":"warpPerspective","cpp":"perspective-0-0-0-0","python":"perspective-uint8-c1-0-0-0--1","parameters":{"configuration":["uint8",1,0,0,false,-1],"source":[17,31],"destination":[13,137]}},
@@ -3105,7 +3175,25 @@
   ],
   "files": {
     "flagcv-h20-stage2-native-baselines/geometry-cpp-large-h20.log": "cdea12dcd27fca679411a7aca82c2df90a4d129a4fe36e90454be55c73a97f63",
-    "flagcv-h20-stage2-native-baselines/geometry-python-large-h20.log": "fc3656c5d2b162637fc3ebdf3357ea1588e031637126bc21c42445edcea02b24"
+    "flagcv-h20-stage2-native-baselines/geometry-python-large-h20.log": "fc3656c5d2b162637fc3ebdf3357ea1588e031637126bc21c42445edcea02b24",
+    "flagcv-h20-stage2-native-baselines/geometry-cpp-large-h20.json": "41d00779e06a8c5ba40c04863c490d0a441837f8b3b67d65679c4f55b0170433",
+    "flagcv-h20-stage2-native-baselines/geometry-python-large-h20.json": "4ed4b0d679b64e99732f5144b1b9f60b8b9ced6f385c1f56395984af918a5d50"
+  },
+  "jobs": {
+    "cpp": [
+      "flagcv-h20-stage2-native-baselines/geometry-cpp-large-h20.json"
+    ],
+    "python": [
+      "flagcv-h20-stage2-native-baselines/geometry-python-large-h20.json"
+    ]
+  },
+  "original_samples": {
+    "cpp": [
+      "flagcv-h20-stage2-native-baselines/geometry-cpp-large-h20.log"
+    ],
+    "python": [
+      "flagcv-h20-stage2-native-baselines/geometry-python-large-h20.log"
+    ]
   },
   "cases": [
     {"operator":"warpPerspective","cpp":"perspective-hd-identity","python":"perspective-hd-identity","parameters":{"configuration":["uint8",1,0,1,true,-1],"source":[720,1280],"destination":[720,1280],"matrix":[1,0,0,0,1,0,0,0,1],"locality":"local"}},
@@ -3138,7 +3226,31 @@
     "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-copy.jsonl": "3932471caebcf17fb5ba5e2d10f496f701b5d9b8af03ccf3c8e73c347ec9fb2e",
     "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-threshold.jsonl": "10188cff0ca165ee0d94be6ae209d3f4224d7f86547cce9ccd0ab15b80b1f379",
     "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-gauss.jsonl": "faab925cf2f6e3fde17d267a6ff29239a52ed09f7c43babe6ecf1771fc8ec82e",
-    "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-filter.jsonl": "0400de14e62300bbe0f8d8b2a4f151da22938ddcbd44484d9dfe100dc7683232"
+    "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-filter.jsonl": "0400de14e62300bbe0f8d8b2a4f151da22938ddcbd44484d9dfe100dc7683232",
+    "flagcv-h20-stage2-native-baselines/arithmetic-filters-cpp-h20.json": "25eaf56f1e8f37cc0d4d566453f670b8608ac18ea062adeec176c1bba9823c37",
+    "flagcv-h20-stage2-native-baselines/arithmetic-filters-cpp-h20.log": "8e5318b67b14e8fdd3da815932e84ab5666a1a3d067ac2ca33a7a4c9f8f92b22",
+    "flagcv-h20-stage2-native-baselines/arithmetic-filters-diagnostics.log": "4c4ae29aa7b230893f77f4fd9ea69ac075da2fbab7e31d5bb6c2ae829c7bc139",
+    "flagcv-h20-stage2-native-baselines/arithmetic-filters-python-h20.json": "3975a42887d05fbaa7fa5f4855025024dc936b7433d531d15d030c1a5e2f07f0"
+  },
+  "jobs": {
+    "cpp": [
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-cpp-h20.json"
+    ],
+    "python": [
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-python-h20.json"
+    ]
+  },
+  "original_samples": {
+    "cpp": [
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-cpp-h20.log",
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-diagnostics.log"
+    ],
+    "python": [
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-copy.jsonl",
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-threshold.jsonl",
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-gauss.jsonl",
+      "flagcv-h20-stage2-native-baselines/arithmetic-filters-matrix-filter.jsonl"
+    ]
   },
   "cases": [
     {"operator":"copyMakeBorder","cpp":"copy-37-19-0-0","python":"copy-37-19-0-0","parameters":{"width":37,"height":19,"cv_type":0,"route":[0]}},
