@@ -71,6 +71,62 @@ def image(host, x=2, y=1):
     target.copy_(torch.from_numpy(host))
     return target
 
+def evaluate_grid(plan, params):
+    grid = []
+    for item in plan:
+        if isinstance(item, int):
+            grid.append(item)
+            continue
+        size = 1
+        for name, block in zip(item["product"], item.get("factor_blocks", [1] * len(item["product"]))):
+            size *= triton.cdiv(params[name], block)
+        grid.append(min(triton.cdiv(size, item["block"]), item.get("limit", 2**63)))
+    return grid
+
+
+def point_plan(call):
+    # The existing helpers own OpenCV-compatible scalar encoding and arguments.
+    # Capture those arguments once, then let the installed provider plan each launch.
+    planned = []
+    names = ("copy_make_border", "threshold_clear", "threshold_histogram",
+             "threshold_select", "threshold_apply")
+    originals = {name: getattr(point, name) for name in names}
+
+    class CaptureKernel:
+        def __init__(self, name, fn):
+            self.name, self.fn = name, fn
+
+        def __getitem__(self, _helper_grid):
+            def capture(*args, **kwargs):
+                params = dict(zip(self.fn.arg_names, args))
+                params.update(kwargs)
+                values = [dict(name=key, value=int(value)) for key,value in params.items()
+                          if isinstance(value, (int, np.integer))]
+                first = args[0]
+                depths = {torch.uint8:"8U", torch.int8:"8S", torch.uint16:"16U", torch.int16:"16S",
+                          torch.int32:"32S", torch.float16:"16F", torch.float32:"32F", torch.float64:"64F"}
+                request = dict(backend="nvidia", target="cuda:90:32", kernel=self.name,
+                               params=values, images=[dict(depth=depths[first.dtype])],
+                               from_platform_registry=False)
+                tune, warps, grid_spec = provider.compile(request)
+                grid = evaluate_grid(grid_spec, params)
+                options = {**kwargs, **tune, "num_warps": warps, "num_stages": 1}
+                planned.append((self.fn[tuple(grid)], args, options, dict(grid=grid, tile=tune)))
+            return capture
+
+    try:
+        for name, fn in originals.items():
+            setattr(point, name, CaptureKernel(name, fn))
+        call()
+    finally:
+        for name, fn in originals.items():
+            setattr(point, name, fn)
+
+    def launch():
+        return [(run(*args, **opts), plan) for run,args,opts,plan in planned]
+    return launch
+
+
 def spatial_call(operation, depth, source, target, ksize, edge, two_pass, weights):
     h, w, channels = source.shape
     if operation == "gauss":
@@ -100,22 +156,14 @@ def spatial_call(operation, depth, source, target, ksize, edge, two_pass, weight
         request.update(backend="nvidia", target="cuda:90:32", from_platform_registry=False)
         tile, warps, plan = provider.compile(request)
         params = {x["name"]: x["value"] for x in request["params"]}
-        grid = []
-        for item in plan:
-            if isinstance(item, int):
-                grid.append(item)
-                continue
-            size = 1
-            for name, block in zip(item["product"], item.get("factor_blocks", [1] * len(item["product"]))):
-                size *= triton.cdiv(params[name], block)
-            grid.append(min(triton.cdiv(size, item["block"]), item.get("limit", 2**63)))
+        grid = evaluate_grid(plan, values)
         launch = loader(str(path), entry["function"])[tuple(grid)]
         arguments = {img["name"]+"_ptr": pointers[img["address"]] for img in request["images"]}
         arguments.update(params)
         arguments.update(tile, num_warps=warps, num_stages=1, enable_fp_fusion=False)
-        calls.append((launch, arguments))
+        calls.append((launch, arguments, dict(grid=grid, tile=tile)))
     def run_spatial():
-        return [call(**arguments) for call, arguments in calls]
+        return [(call(**arguments), plan) for call, arguments, plan in calls]
     return run_spatial
 
 def check_pixels(actual, expected, tolerance):
@@ -200,9 +248,12 @@ def run_case(identifier):
                 else:
                     native_plan = cv2.cuda.createLinearFilter(cvtype,cvtype,weights,(-1,-1),edge)
             return None, native_plan.apply(native_source, native_output, native_stream)
+    if operation in ("copy", "threshold"):
+        candidate = point_plan(candidate)
     compiled = candidate()
     launch = [dict(name=k.metadata.name, hash=k.hash, stages=k.metadata.num_stages,
-                   fusion=k.metadata.enable_fp_fusion, warps=k.metadata.num_warps) for k in compiled]
+                   fusion=k.metadata.enable_fp_fusion, warps=k.metadata.num_warps, **plan)
+              for k,plan in compiled]
     actual_scalar = device_scalar[0].item() if device_scalar is not None else host_cutoff if operation=="threshold" else None
     if not check_pixels(target, expected, tolerance) or actual_scalar != expected_scalar:
         return dict(id=identifier, classification="CANDIDATE_CPU_DIFFER", launch=launch,

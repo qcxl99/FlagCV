@@ -130,9 +130,9 @@ def batch_cpp(payload):
             raise ValueError(f"bad C++ batch sample count: {case}")
         identical = all(float(row["cuda_cpu_max_abs"]) == 0.0 for row in rows)
         ratios = {
-            metric: median(float(row[f"cuda_{metric}_us"]) for row in rows) /
-            median(float(row[f"flagcv_{metric}_us"]) for row in rows)
-            for metric in ("event", "wall")
+            metric: median(float(row[f"cuda_{metric}_us"]) / float(row[f"flagcv_{metric}_us"])
+                           for row in rows)
+            for metric in ("event", "wall", "batch_wall")
         } if identical else {}
         yield dict(case=case, classification="COMPARABLE" if identical else "SEMANTICS_DIFFER", ratios=ratios)
 
