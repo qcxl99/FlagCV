@@ -95,6 +95,16 @@
       "name": "cvtcolor",
       "source": "common/cvtcolor.py",
       "function": "_cvtcolor_cpu_kernel"
+    },
+    {
+      "name": "cvtcolor_swap_c4",
+      "source": "common/cvtcolor.py",
+      "function": "_cvtcolor_swap_c4"
+    },
+    {
+      "name": "resize_area_2tap",
+      "source": "common/resize.py",
+      "function": "_resize_cpu_area_kernel"
     }
   ]
 }

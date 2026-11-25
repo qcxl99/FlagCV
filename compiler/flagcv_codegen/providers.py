@@ -94,7 +94,7 @@ def plan_warp_affine(request, facts):
 
 
 def plan_resize(request, facts):
-    area = request["kernel"] in ("resize_area", "resize_area_fast")
+    area = request["kernel"] in ("resize_area", "resize_area_2tap", "resize_area_fast")
     block_h, block_w = (1, 64) if area else (2, 128)
     batch_limit = 65535 if facts["triton_backend"] in ("cuda", "hip") else 0
     batch = {"product": ["batch_count"], "block": 1}
@@ -104,6 +104,8 @@ def plan_resize(request, facts):
         batch["limit"] = batch_limit
         grid[2] = {"product": ["batch_count"], "block": batch_limit}
     tuning = {"BLOCK_H": block_h, "BLOCK_W": block_w, "BATCH_GRID_LIMIT": batch_limit}
+    if request["kernel"] in ("resize_area", "resize_area_2tap"):
+        tuning["UNROLL_TWO_TAPS"] = False
     if request["kernel"] == "resize_area_fast":
         tuning["RY"] = 4
     return tuning, min(4, facts["max_warps"]), grid
@@ -117,7 +119,10 @@ def plan_cvtcolor(request, facts):
     if col_limit:
         grid[1]["limit"] = col_limit
         grid[2] = {"product": ["cols"], "block": col_limit * block}
-    return {"BLOCK": block, "COL_GRID_LIMIT": col_limit}, min(4, facts["max_warps"]), grid
+    tuning = {"BLOCK": block, "COL_GRID_LIMIT": col_limit}
+    if request["kernel"] == "cvtcolor_swap_c4":
+        tuning["VECTOR4"] = False
+    return tuning, min(4, facts["max_warps"]), grid
 
 
 PLANS = dict.fromkeys(
@@ -129,9 +134,10 @@ PLANS = dict.fromkeys(
 )
 PLANS["flip"] = plan_flip
 PLANS["cvtcolor"] = plan_cvtcolor
+PLANS["cvtcolor_swap_c4"] = plan_cvtcolor
 for mode in ("nearest", "linear", "cubic"):
     PLANS[f"warp_affine_{mode}"] = plan_warp_affine
-for route in ("copy", "nearest", "separable", "area", "area_fast"):
+for route in ("copy", "nearest", "separable", "area", "area_2tap", "area_fast"):
     PLANS[f"resize_{route}"] = plan_resize
 
 

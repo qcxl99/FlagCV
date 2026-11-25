@@ -216,19 +216,26 @@ int main(int argc, char** argv) {
 #endif
     cv::setNumThreads(1);
     const Stream default_stream(false), native_stream;
-    check_integer_border_rounding(handle, native_stream);
+    const bool u16_linear_c3 = argc == 2 && std::string(argv[1]) == "--u16-linear-c3";
+    if (!u16_linear_c3) check_integer_border_rounding(handle, native_stream);
     if (argc == 2 && std::string(argv[1]) == "--integer-border") {
       std::cout << "warpAffine integer border: 16 cases passed\n";
       return 0;
     }
-    reject_cases(handle);
-    check_wide_indices(handle);
-    check_cubic_constant_fringe(handle, native_stream);
+    if (!u16_linear_c3) {
+      reject_cases(handle);
+      check_wide_indices(handle);
+      check_cubic_constant_fringe(handle, native_stream);
+    }
     int cases = 0;
     int failures = 0;
     for (int depth : {CV_8U, CV_16U, CV_32F}) {
       for (int channels : {1, 3, 4}) {
         for (const Mode mode : modes) {
+          if (u16_linear_c3 &&
+              (depth != CV_16U || channels != 3 ||
+               (mode.flagcv != Interpolation::kLinear && mode.flagcv != Interpolation::kArea)))
+            continue;
           for (const BorderMode border : borders) {
             if (mode.flagcv == Interpolation::kCubic && border.flagcv == Border::kTransparent)
               continue;

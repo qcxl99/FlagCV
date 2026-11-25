@@ -1015,3 +1015,33 @@ def _cvtcolor_cpu_kernel(src_ptr, dst_ptr, sdiv_ptr, hdiv_ptr, t32_ptr, t16_ptr,
         tl.store(dst + dp, h.to(tl.uint8), mask=m)
         tl.store(dst + dp + 1, s.to(tl.uint8), mask=m)
         tl.store(dst + dp + 2, v.to(tl.uint8), mask=m)
+
+
+@triton.jit
+def _cvtcolor_swap_c4(src_ptr, dst_ptr, cols, src_rs, dst_rs, rows,
+                       BLOCK: tl.constexpr, COL_GRID_LIMIT: tl.constexpr,
+                       VECTOR4: tl.constexpr):
+    """Swap B/R in F32 C4 pixels without touching their floating-point encodings."""
+    src = src_ptr.to(tl.pointer_type(tl.uint32))
+    dst = dst_ptr.to(tl.pointer_type(tl.uint32))
+    row = tl.program_id(0).to(tl.int64)
+    tile = tl.program_id(1).to(tl.int64)
+    if COL_GRID_LIMIT:
+        tile += tl.program_id(2).to(tl.int64) * COL_GRID_LIMIT
+    x = tile * BLOCK + tl.arange(0, BLOCK)
+    mask = (row < rows) & (x < cols)
+    source = src + tl.multiple_of(row * src_rs + 4 * x, 4)
+    target = dst + tl.multiple_of(row * dst_rs + 4 * x, 4)
+
+    if VECTOR4:
+        lane = tl.arange(0, 4)
+        pixel = tl.load(source[:, None] + lane[None, :], mask=mask[:, None], other=0)
+        even, odd = tl.split(tl.reshape(pixel, [BLOCK, 2, 2]))
+        blue, red = tl.split(even)
+        swapped = tl.reshape(tl.join(tl.join(red, blue), odd), [BLOCK, 4])
+        tl.store(target[:, None] + lane[None, :], swapped, mask=mask[:, None])
+    else:
+        tl.store(target, tl.load(source + 2, mask=mask, other=0), mask=mask)
+        tl.store(target + 1, tl.load(source + 1, mask=mask, other=0), mask=mask)
+        tl.store(target + 2, tl.load(source, mask=mask, other=0), mask=mask)
+        tl.store(target + 3, tl.load(source + 3, mask=mask, other=0), mask=mask)

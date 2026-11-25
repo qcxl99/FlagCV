@@ -495,7 +495,7 @@ def _resize_cpu_area_fast_kernel(src_ptr, dst_ptr, src_h, src_w, dst_h, W, cn: t
 @triton.jit
 def _resize_cpu_area_kernel(src_ptr, dst_ptr, xs_ptr, xa_ptr, xc_ptr, ys_ptr, ya_ptr, yc_ptr, KX, KY,
                      dst_h, W, cn: tl.constexpr, src_rs, dst_rs, src_bs, dst_bs, batch_count, dst_w,
-                     U8: tl.constexpr, BLOCK_H: tl.constexpr, BLOCK_W: tl.constexpr, BATCH_GRID_LIMIT: tl.constexpr):
+                     U8: tl.constexpr, UNROLL_TWO_TAPS: tl.constexpr, BLOCK_H: tl.constexpr, BLOCK_W: tl.constexpr, BATCH_GRID_LIMIT: tl.constexpr):
     """resizeArea_: h = h + S*alpha over x taps in table order, acc = acc + beta*h over y taps.
 
     computeResizeAreaTab gives every pixel CONSECUTIVE source columns
@@ -506,6 +506,9 @@ def _resize_cpu_area_kernel(src_ptr, dst_ptr, xs_ptr, xa_ptr, xc_ptr, ys_ptr, ya
     so a padded tap (weight 0) adds an exact +0.0 and needs no predicate on the sums;
     float32 can hold inf/NaN (inf * 0 = NaN), so there padded taps stay masked out.
     """
+    if UNROLL_TWO_TAPS:
+        KX = 2
+        KY = 2
     row0, col0, b = _resize_tiles(dst_w, BLOCK_H, BLOCK_W, BATCH_GRID_LIMIT)
     if b < batch_count:
         src, dst, xs, xa, xc, ys, ya, yc = src_ptr, dst_ptr, xs_ptr, xa_ptr, xc_ptr, ys_ptr, ya_ptr, yc_ptr
@@ -528,7 +531,7 @@ def _resize_cpu_area_kernel(src_ptr, dst_ptr, xs_ptr, xa_ptr, xc_ptr, ys_ptr, ya
         acc1 = tl.zeros([BLOCK_H, BLOCK_W], dtype=tl.float32)
         acc2 = tl.zeros([BLOCK_H, BLOCK_W], dtype=tl.float32)
         acc3 = tl.zeros([BLOCK_H, BLOCK_W], dtype=tl.float32)
-        for ky in range(0, KY):
+        for ky in tl.range(0, KY, loop_unroll_factor=2 if UNROLL_TWO_TAPS else 1):
             ylive = ky < ycnt
             sy = tl.load(ys + rows * KY + ky, mask=rm, other=0).to(tl.int64)
             beta = tl.load(ya + rows * KY + ky, mask=rm, other=0.0)

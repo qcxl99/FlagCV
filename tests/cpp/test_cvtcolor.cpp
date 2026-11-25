@@ -10,6 +10,8 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <string_view>
+#include <vector>
 
 namespace {
 using flagcv::ColorTables;
@@ -145,6 +147,54 @@ void check_family_stream_reuse(flagcv::Handle& handle, Tables& tables,
           "cvtColor shared immutable Luv table differs across streams");
 }
 
+void check_c4_swap_layouts(flagcv::Handle& handle, const Stream& stream) {
+  constexpr int rows = 3, cols = 9, row_values = cols * 4;
+  constexpr std::uint32_t patterns[] = {
+      0x7fc00123u, 0x80000000u, 0x7fc00456u, 0xff800000u,
+      0x00000000u, 0x7f800000u, 0xffc00001u, 0x80000000u};
+  // Rotate the misalignment among addresses and row strides. All remain
+  // valid typed float views, including the ones that cannot read vectors.
+  for (int layout = 0; layout < 5; ++layout) {
+    const int source_offset = layout == 1;
+    const int target_offset = layout == 2;
+    const int source_stride = row_values + 4 + (layout == 3);
+    const int target_stride = row_values + 8 + (layout == 4);
+    std::vector<float> host_source(source_stride * rows + source_offset);
+    std::vector<float> target_guard(target_stride * rows + target_offset, -45.5f);
+    auto target_received = target_guard;
+    cv::Mat source(rows, cols, CV_32FC4, host_source.data() + source_offset,
+                   source_stride * sizeof(float));
+    for (int y = 0; y < rows; ++y)
+      for (int x = 0; x < row_values; ++x)
+        std::memcpy(source.ptr<float>(y) + x,
+                    &patterns[(x+y) % std::size(patterns)], sizeof(float));
+    cv::Mat expected;
+    cv::cvtColor(source, expected, cv::COLOR_BGRA2RGBA);
+
+    DeviceMemory input(host_source.size() * sizeof(float));
+    DeviceMemory output(target_guard.size() * sizeof(float));
+    cuda_check(cudaMemcpyAsync(input.ptr, host_source.data(), host_source.size() * sizeof(float),
+                               cudaMemcpyHostToDevice, stream.value));
+    cuda_check(cudaMemcpyAsync(output.ptr, target_guard.data(), target_guard.size() * sizeof(float),
+                               cudaMemcpyHostToDevice, stream.value));
+    const flagcv::GpuMat in(static_cast<float*>(input.ptr) + source_offset, cols, rows,
+                            Depth::k32F, 4, source_stride * sizeof(float));
+    const flagcv::GpuMat out(static_cast<float*>(output.ptr) + target_offset, cols, rows,
+                             Depth::k32F, 4, target_stride * sizeof(float));
+    flagcv::cvtColor(handle, in, out, cv::COLOR_BGRA2RGBA, {}, stream.value);
+    cuda_check(cudaMemcpyAsync(target_received.data(), output.ptr,
+                               target_guard.size() * sizeof(float),
+                               cudaMemcpyDeviceToHost, stream.value));
+    stream.wait();
+    cv::Mat result(rows, cols, CV_32FC4, target_received.data() + target_offset,
+                   target_stride * sizeof(float));
+    require(bytes_equal(result, expected), "C4 swap changed a float encoding");
+    result.setTo(cv::Scalar::all(-45.5f));
+    require(std::memcmp(target_guard.data(), target_received.data(),
+                        target_guard.size() * sizeof(float)) == 0, "C4 swap touched padding");
+  }
+}
+
 template<class Call>
 void rejects(Call call) {
   try {
@@ -178,7 +228,7 @@ void reject_cases(flagcv::Handle& handle, Tables& tables, const Stream& stream) 
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
 #ifdef FLAGCV_TEST_HIP
     flagcv::Handle handle("hip");
@@ -186,6 +236,11 @@ int main() {
     flagcv::Handle handle;
 #endif
     const Stream native, default_stream(false);
+    check_c4_swap_layouts(handle, native);
+    if (argc == 2 && std::string_view(argv[1]) == "--c4-swap-layouts") {
+      std::cout << "cvtColor C4 swap: five aligned and misaligned layout checks passed\n";
+      return 0;
+    }
     Tables tables;
     reject_cases(handle, tables, native);
     int errors = 0;

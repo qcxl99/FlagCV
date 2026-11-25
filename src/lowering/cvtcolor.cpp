@@ -63,6 +63,21 @@ LoweredOp lower_cvtcolor(const GpuMat& src, const GpuMat& dst, int code,
   const bool forward_luv = family == ColorTables::kLuvForward;
 
   LoweredOp op;
+  const bool aligned_c4 = code == 5 && s.depth == Depth::k32F &&
+      s.address % 16 == 0 && d.address % 16 == 0 &&
+      s.row_stride % 4 == 0 && d.row_stride % 4 == 0;
+  if (aligned_c4) {
+    // BGRA to RGBA can move one whole aligned pixel. The distinct registry
+    // key prevents a cached aligned binary being used for an unaligned view.
+    op.kernel = "cvtcolor_swap_c4";
+    op.images = {s, d};
+    op.add_param("cols", d.width);
+    op.add_param("src_rs", s.row_stride);
+    op.add_param("dst_rs", d.row_stride);
+    op.add_param("rows", d.height);
+    return op;
+  }
+
   op.kernel = "cvtcolor";
   op.images.reserve(7);
   op.add_image(s);
