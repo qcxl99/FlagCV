@@ -56,6 +56,10 @@ def compile(request):
             tuning.update(INTERIOR_TILE=True, BLOCK=256)
             grid = [{"product": ["height"], "block": 1},
                     {"product": ["width"], "block": 64}, 1]
+        elif request["kernel"] == "gaussian_f32_local":
+            tuning.update(BLOCK=64, TILE_Y=16)
+            grid = [{"product": ["width", "CHANNELS"], "block": tuning["BLOCK"]},
+                    {"product": ["height"], "block": tuning["TILE_Y"]}, 1]
         elif request["kernel"] == "resize_area_2tap":
             tuning["UNROLL_TWO_TAPS"] = True
     params = {param["name"]: param for param in request["params"]}
