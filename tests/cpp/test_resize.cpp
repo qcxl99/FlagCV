@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <string_view>
 
 namespace {
 using flagcv::DeviceWorkspace;
@@ -139,6 +140,82 @@ void run_batch(flagcv::Handle& handle, const Stream& stream, Size in, ResizeOpti
   require(bytes_equal(source.host, source.download(stream)), "resizeBatch changed its source");
 }
 
+void check_independent_cpu(flagcv::Handle& handle, const Stream& stream) {
+  struct Case {
+    const char* name;
+    Size source;
+    ResizeOptions options;
+    int type;
+  };
+  const Case cases[] = {
+      {"nearest-reciprocal-6-to-34", {6, 1}, {{34, 1}, 0, 0, Interpolation::kNearest}, CV_8UC1},
+      {"cubic-half-rounding", {2, 1}, {{3, 1}, 0, 0, Interpolation::kCubic}, CV_8UC3},
+      {"cubic-coefficients-and-tail", {13, 7}, {{29, 13}, 0, 0, Interpolation::kCubic}, CV_8UC3},
+      {"fractional-area", {37, 29}, {{17, 13}, 0, 0, Interpolation::kArea}, CV_8UC3},
+      {"mixed-area-up-down", {31, 11}, {{13, 23}, 0, 0, Interpolation::kArea}, CV_8UC1},
+      {"noninteger-fx-fy", {19, 17}, {{}, 0.664, 1.37, Interpolation::kLinear}, CV_8UC4},
+      {"linear-2x-area-alias", {60, 32}, {{}, 0.5, 0.5, Interpolation::kLinear}, CV_8UC4},
+      {"nearest-fp32-outside-measured-envelope", {6, 1}, {{34, 1}, 0, 0, Interpolation::kNearest}, CV_32FC1},
+  };
+  int errors = 0;
+  for (const auto& item : cases) {
+    try {
+      const Size in = item.source;
+      const auto& options = item.options;
+      Image src(in.height, in.width, item.type, 3, 2, 5);
+      cv::RNG rng(5302);
+      if (src.host.depth() == CV_32F)
+        rng.fill(src.host, cv::RNG::UNIFORM, -1e8, 1e8);
+      else
+        rng.fill(src.host, cv::RNG::UNIFORM, 0, 256);
+      if (std::string_view(item.name) == "nearest-reciprocal-6-to-34")
+        for (int x = 0; x < in.width; ++x)
+          src.pixels().at<std::uint8_t>(0, x) = static_cast<std::uint8_t>(x);
+
+      if (std::string_view(item.name) == "cubic-half-rounding") {
+        src.pixels().col(0).setTo(cv::Scalar::all(0));
+        src.pixels().col(1).setTo(cv::Scalar::all(1));
+      }
+
+      cv::Mat expected;
+      cv::resize(src.pixels(), expected, {options.size.width, options.size.height},
+                  options.fx, options.fy, static_cast<int>(options.interpolation));
+      if (std::string_view(item.name) == "nearest-reciprocal-6-to-34")
+        require(expected.at<std::uint8_t>(0, 17) == 2, "fixed CPU nearest tie identity changed");
+      if (std::string_view(item.name) == "linear-2x-area-alias") {
+        cv::Mat cpu_area;
+        cv::resize(src.pixels(), cpu_area, {}, options.fx, options.fy, cv::INTER_AREA);
+        require(bytes_equal(expected, cpu_area), "fixed CPU LINEAR 2x AREA alias changed");
+      }
+      const ResizePlan plan(in, flagcv_test::depth_for(src.host.depth()),
+                            src.host.channels(), options);
+      const auto out = plan.destination_size();
+      require(out.width == expected.cols && out.height == expected.rows,
+              "planned destination differs from independently resolved CPU size");
+      Image dst(expected.rows, expected.cols, item.type, 1, 3, 3);
+      dst.host.setTo(cv::Scalar::all(113));
+      Tables tables(plan, stream);
+      src.upload(stream.value);
+      dst.upload(stream.value);
+      flagcv::resize(handle, src.view(), dst.view(), plan, tables.view(), stream.value);
+      const auto got = dst.download(stream);
+      if (!bytes_equal(got(dst.roi), expected)) {
+        const double diff = cv::norm(got(dst.roi), expected, cv::NORM_INF);
+        const int neq = cv::countNonZero(got(dst.roi).reshape(1) != expected.reshape(1));
+        std::cout << "independent CPU difference " << item.name << " mismatches=" << neq
+                  << " max_abs=" << diff << '\n';
+      }
+      compare_roi(dst, got, expected, options.interpolation);
+      std::cout << "independent CPU PASS " << item.name
+                << " " << expected.cols << "x" << expected.rows << '\n';
+    } catch (const std::exception& error) {
+      ++errors;
+      std::cout << "independent CPU FAIL " << item.name << " " << error.what() << '\n';
+    }
+  }
+  require(errors == 0, "resize independent CPU comparisons failed");
+}
+
 template<class Call>
 void rejects(Call call) {
   try {
@@ -189,7 +266,7 @@ void check_wide_area_sum(flagcv::Handle& handle, const Stream& stream) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
 #ifdef FLAGCV_TEST_HIP
     flagcv::Handle handle("hip");
@@ -197,6 +274,8 @@ int main() {
     flagcv::Handle handle;
 #endif
     const Stream native, default_stream(false);
+    check_independent_cpu(handle, native);
+    if (argc == 2 && std::string_view(argv[1]) == "--independent-cpu") return 0;
     reject_cases(handle, native);
     for (auto mode : modes) {
       for (int channels : {1, 3, 4}) {
