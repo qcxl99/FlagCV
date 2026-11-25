@@ -129,8 +129,12 @@ GaussianPlan::GaussianPlan(Size source, Depth depth, GaussianOptions options) {
   const auto sy = options.sigma_y > 0 ? options.sigma_y : sx;
   const Size kernel{gaussian_axis(options.kernel.width, sx, depth, source.width, options.border),
                     gaussian_axis(options.kernel.height, sy, depth, source.height, options.border)};
+  // OpenCV resolves both axes, clamps their sigmas, then shares the
+  // horizontal coefficients for equal axes and nearly identical sigmas.
+  const bool share_axis = kernel.width == kernel.height &&
+      std::abs(std::max(sx, 0.) - std::max(sy, 0.)) < std::numeric_limits<double>::epsilon();
   auto x = gaussian_weights(kernel.width, sx);
-  auto y = gaussian_weights(kernel.height, sy);
+  auto y = share_axis ? x : gaussian_weights(kernel.height, sy);
   if (depth == Depth::k8U || depth == Depth::k16U) {
     const int bits = depth == Depth::k8U ? 8 : 16;
     quantize(x, bits);

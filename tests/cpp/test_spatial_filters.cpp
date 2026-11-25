@@ -189,6 +189,34 @@ bool gaussian_sigma_boundaries(Handle& handle, const Stream& upload, const Strea
                 << " gpu=" << got << " cpu=" << expected << '\n';
       all_equal &= table_matches && gpu_matches;
     }
+
+    // Near-equal sigmas on equal axes reuse the horizontal table, even when
+    // generating the vertical table independently crosses a rounding step.
+    const double after = depth == CV_8U ? std::numeric_limits<double>::infinity() : 0.;
+    const double neighbor = std::nextafter(center, after);
+    const GaussianPlan plan({5, 5}, depth_for(depth), {{3, 3}, center, neighbor, Border::kReplicate});
+    const auto* weights = static_cast<const double*>(plan.table().data);
+    const bool shared = std::equal(weights, weights + 3, weights + 3);
+    const Table table(plan.table(), upload);
+    Image src(5, 5, CV_MAKETYPE(depth, 1)), dst(5, 5, CV_MAKETYPE(depth, 1));
+    Image scratch(5, 5, CV_32SC1);
+    src.host.setTo(0);
+    src.host(cv::Rect(2, 2, 1, 1)).setTo(units - 1);
+    src.upload(upload.value);
+    upload.wait();
+    cv::Mat expected;
+    cv::GaussianBlur(src.pixels(), expected, {3, 3}, center, neighbor, cv::BORDER_REPLICATE);
+    flagcv::GaussianBlur(handle, src.view(), dst.view(), plan, table.view(), use.value);
+    const auto direct = dst.download(use);
+    flagcv::GaussianBlur(handle, src.view(), dst.view(), plan, table.view(), scratch.view(), use.value);
+    const auto separable = dst.download(use);
+    auto center_value = [depth](const cv::Mat& values) -> int {
+      return depth == CV_8U ? values.at<unsigned char>(2, 2) : values.at<unsigned short>(2, 2);
+    };
+    std::cout << "sigma-share " << bits << " x=" << weights[1] << " y=" << weights[4]
+              << " direct=" << center_value(direct) << " two_pass=" << center_value(separable)
+              << " cpu=" << center_value(expected) << '\n';
+    all_equal &= shared && bytes_equal(direct, expected) && bytes_equal(separable, expected);
   }
   return all_equal;
 }
@@ -354,7 +382,7 @@ int main(int argc, char** argv) {
       passed += 2;
     }
     require(gaussian_sigma_boundaries(handle, upload, custom), "GaussianBlur sigma boundary differs");
-    passed += 6;
+    passed += 8;
     std::cout << "GaussianBlur " << passed << " reference cases passed\n";
 
     constexpr double asymmetric[] = {0.5, -1.25, 0.0, 2.0, 0.25, -0.75};
