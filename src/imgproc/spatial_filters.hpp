@@ -23,6 +23,7 @@ struct Filter2DPlan::Data {
   Border border;
   FilterAnchor anchor;
   bool zero_filter;
+  bool dense_filter;
   std::vector<double> coefficients;
 };
 

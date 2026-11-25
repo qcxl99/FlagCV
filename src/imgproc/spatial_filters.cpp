@@ -174,13 +174,17 @@ Filter2DPlan::Filter2DPlan(Size kernel, const double* coefficients, Depth source
   table.reserve(count + 1);
   table.push_back(options.delta);
   bool zero_filter = true;
+  bool dense_filter = true;
   for (int i = 0; i < count; ++i) {
     check_coefficient(coefficients[i], work_double);
     table.push_back(coefficients[i]);
-    if (work_double ? coefficients[i] != 0.0 : static_cast<float>(coefficients[i]) != 0.0f)
-      zero_filter = false;
+    const bool nonzero = work_double ? coefficients[i] != 0.0 :
+                                      static_cast<float>(coefficients[i]) != 0.0f;
+    zero_filter &= !nonzero;
+    dense_filter &= nonzero;
   }
-  data_ = std::make_shared<Data>(Data{kernel, source, destination, options.border, anchor, zero_filter, std::move(table)});
+  data_ = std::make_shared<Data>(Data{kernel, source, destination, options.border, anchor,
+                                    zero_filter, dense_filter, std::move(table)});
 }
 
 HostTableData Filter2DPlan::table() const {

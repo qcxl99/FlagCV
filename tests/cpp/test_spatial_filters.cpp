@@ -293,6 +293,23 @@ void benchmark(Handle& handle, const Stream& stream) {
   }
 }
 
+void row_pair_cases(Handle& handle, const Stream& upload, const Stream& stream) {
+  Image src(129, 257, CV_32FC3, 3, 2, 7), dst(129, 257, CV_32FC3, 4, 1, 9);
+  initialize(src, 744);
+  initialize(dst, 745);
+  std::array<double, 24> weights{};
+  for (std::size_t i = 0; i < weights.size(); ++i)
+    weights[i] = (i % 7 + 1) / 64.0 * (i % 2 == 0 ? 1 : -1);
+  const Filter2DOptions options{{}, {5, 0}, -0.125, Border::kReflect101};
+  correlation_case(handle, upload, stream, src, dst, {6, 4}, weights.data(),
+                   options, cv::BORDER_REFLECT_101);
+  // The plan classifies density in working precision. A nonzero double
+  // which narrows to zero must keep the zero-skipping direct kernel.
+  weights[3] = std::numeric_limits<double>::denorm_min();
+  correlation_case(handle, upload, stream, src, dst, {6, 4}, weights.data(),
+                   options, cv::BORDER_REFLECT_101);
+}
+
 template<class Function>
 void reject(Function function) {
   try { function(); } catch (const std::invalid_argument&) { return; }
@@ -351,6 +368,11 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") {
       std::cout << "case,block,direct_sync_us,separable_sync_us,scratch_bytes\n";
       benchmark(handle, custom);
+      return 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--row-pair") {
+      row_pair_cases(handle, upload, custom);
+      std::cout << "filter2D row-pair and rounded-zero fallback passed\n";
       return 0;
     }
     rejection_cases(handle, upload);
@@ -429,7 +451,8 @@ int main(int argc, char** argv) {
     initialize(large_dst, 726);
     correlation_case(handle, upload, custom, large_src, large_dst, {9, 9}, larger.data(),
                      {{}, {1, 6}, .25, Border::kReflect101}, cv::BORDER_REFLECT_101);
-    std::cout << "filter2D " << passed + 5 << " reference cases passed\n";
+    row_pair_cases(handle, upload, custom);
+    std::cout << "filter2D " << passed + 7 << " reference cases passed\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

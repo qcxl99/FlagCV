@@ -165,3 +165,44 @@ def gaussian_vertical(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, ds
         shift: tl.constexpr = 2 * FIXED_BITS
         accum = (accum + (1 << (shift - 1))) >> shift
     tl.store(dst_ptr + y * dst_stride + x * CHANNELS + channel, accum, mask)
+
+
+@triton.jit
+def filter2d_dense(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                   row_values, kernel_width, kernel_height, anchor_x, anchor_y,
+                   CHANNELS: tl.constexpr, BORDER: tl.constexpr, FP64: tl.constexpr,
+                   ZERO_FILTER: tl.constexpr, DEST_INTEGER: tl.constexpr,
+                   DEST_MIN: tl.constexpr, DEST_MAX: tl.constexpr,
+                   BLOCK: tl.constexpr, ROW_PAIR: tl.constexpr):
+    if not ROW_PAIR:
+        filter2d_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                        kernel_width, kernel_height, anchor_x, anchor_y, CHANNELS,
+                        BORDER, FP64, ZERO_FILTER, DEST_INTEGER, DEST_MIN, DEST_MAX, BLOCK)
+    else:
+        tiles = tl.cdiv(tl.cast(row_values, tl.int64), BLOCK)
+        tile = tl.program_id(0).to(tl.int64)
+        element = (tile % tiles) * BLOCK + tl.arange(0, BLOCK)
+        y = 2 * (tile // tiles)
+        x = element // CHANNELS
+        channel = element % CHANNELS
+        mask = element < row_values
+        delta = tl.load(coeff_ptr).to(tl.float32)
+        top = tl.full((BLOCK,), 0, tl.float32) + delta
+        bottom = tl.full((BLOCK,), 0, tl.float32) + delta
+        # r is a virtual source row relative to the top output. Every
+        # overlapping row is loaded once. Each accumulator still sees its
+        # coefficients in increasing row/column order, starting at delta.
+        for r in range(kernel_height + 1):
+            sy, valid_y = _coordinates(y + r - anchor_y, height, BORDER)
+            for kx in range(kernel_width):
+                sx, valid_x = _coordinates(x + kx - anchor_x, width, BORDER)
+                pixel = tl.load(src_ptr + sy * src_stride + sx * CHANNELS + channel,
+                                mask & valid_x & valid_y, 0)
+                if r < kernel_height:
+                    weight = tl.load(coeff_ptr + 1 + r * kernel_width + kx).to(tl.float32)
+                    top += pixel * weight
+                if r > 0:
+                    weight = tl.load(coeff_ptr + 1 + (r - 1) * kernel_width + kx).to(tl.float32)
+                    bottom += pixel * weight
+        tl.store(dst_ptr + y * dst_stride + element, top, mask)
+        tl.store(dst_ptr + (y + 1) * dst_stride + element, bottom, mask & (y + 1 < height))

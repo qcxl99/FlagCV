@@ -116,8 +116,16 @@ std::array<LoweredOp, 2> lower_gaussian_separable(
 LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
                          const Filter2DPlan& plan, DeviceWorkspace workspace) {
   const auto& data = SpatialFilterAccess::get(plan);
-  auto op = prepare("filter2d_direct", src, dst, data.source_depth, data.destination_depth,
-                    workspace, plan.table().bytes);
+  const bool dense_pair_candidate =
+      data.source_depth == Depth::k32F && data.destination_depth == Depth::k32F &&
+      data.border == Border::kReflect101 && data.dense_filter && src.channels() == 3 &&
+      src.width() >= 256 && src.height() >= 128 &&
+      data.kernel.width >= 3 && data.kernel.width <= 9 &&
+      data.kernel.height >= 3 && data.kernel.height <= 9;
+  auto op = prepare(dense_pair_candidate ? "filter2d_dense" : "filter2d_direct",
+                    src, dst, data.source_depth, data.destination_depth, workspace, plan.table().bytes);
+  if (dense_pair_candidate)
+    op.add_param("row_values", std::int64_t{src.width()} * src.channels());
   op.add_param("kernel_width", data.kernel.width);
   op.add_param("kernel_height", data.kernel.height);
   op.add_param("anchor_x", data.anchor.x);
