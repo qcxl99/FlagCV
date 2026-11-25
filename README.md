@@ -23,17 +23,20 @@ Plus the toolchain of the backend you build. `libflagcv` itself links no vendor 
 |---|---|
 | `nvidia` | CUDA driver API (`CUDA::cuda_driver`) |
 | `iluvatar` | CUDA-compatible driver API (`CUDA::cuda_driver`) |
-| `ascend` | AscendCL / runtime |
 | `hygon` | HIP runtime |
 | `mthreads` | MUSA runtime |
 | `thead` | PPU driver API (`CUstream`), T-Head PPU SDK |
 
-The NVIDIA backend is the one built and tested here; the other five implement
-the same plugin contract and compile against their SDKs when it is present
-(`-DCUDAToolkit_ROOT=<corex>` for `iluvatar`).
+NVIDIA is the validated C++ backend. Iluvatar, Hygon, MThreads and T-Head
+can be built with their SDKs and await native launch qualification.
+For Iluvatar, use `-DCUDAToolkit_ROOT=<corex>`.
 
 C++ interface conventions and the call path are documented in
 [C++ operator interfaces](docs/cpp-operators.md).
+
+Ascend C++ is unavailable in this build. Selecting `ascend` in
+`FLAGCV_BACKENDS` fails at configure time. Enablement requires verification
+with an application-owned AscendCL context, buffers and stream.
 
 The public C++ launcher currently qualifies NVIDIA with Triton 3.6.0.
 See [scratch ABI qualification](docs/architecture.md#scratch-abi-qualification)
