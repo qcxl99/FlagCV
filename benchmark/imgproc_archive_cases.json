@@ -4054,5 +4054,97 @@
     {"operator":"GaussianBlur","cpp":"gauss-1920-1080-101-7-3-1","python":"gauss-1920-1080-101-7-3-1","parameters":{"width":1920,"height":1080,"cv_type":101,"route":[7,3,1]}},
     {"operator":"filter2D","cpp":"filter-1920-1080-101-7-3-0","python":"filter-1920-1080-101-7-3-0","parameters":{"width":1920,"height":1080,"cv_type":101,"route":[7,3,0]}}
   ]
+},
+{
+  "id": "resize-batch",
+  "gpu": "GPU-17c4897b-c1c9-e326-1f0b-863af1ad4ff7",
+  "source": "6ed99d19c26d0e8175e64ecada74d4c0398ef3f3",
+  "cpp": "flagcv-imgproc-stage1-perf-h20/cpp-batch-matrix.log",
+  "python": [
+    "flagcv-imgproc-stage1-perf-h20/python-batch-matrix.log"
+  ],
+  "files": {
+    "flagcv-imgproc-stage1-perf-h20/batch-matrix.json": "ff49e4b373a407d45beb5dda2682bdb7f4ddc912dcca44dfa89411f0b6dcab93",
+    "flagcv-imgproc-stage1-perf-h20/cpp-batch-matrix.log": "3d03dc775ae8b7e67fbdbcbe2e92273bbb09a41ae3fbc741b56dede4f7ca0c2b",
+    "flagcv-imgproc-stage1-perf-h20/python-batch-matrix.log": "ca5a249d8c192742db22d23bc6114d8377efd134162f2685afdf601fb0378251",
+    "flagcv-imgproc-stage1-perf-h20/canonical-identity.txt": "06c5cd0e019350c166cf24d7ece44f77ec11c79c8fc8e75da16a9eb00f739090",
+    "flagcv-imgproc-stage1-perf-h20/run-batch-affected.sh": "7eea52fa0afae3618a5c012ce912af48875dffa9e59d756a2a442aa6a7497013",
+    "flagcv-imgproc-stage1-perf-h20/final-build-and-evidence.sha256": "dd7b69d1bec01d2d63f7719a999e2eaa2f8e8ccbd849e1376fa566c441a144a1",
+    "flagcv-imgproc-stage1-perf-h20/batch-matrix-h20.json": "2dd6dcda9a3ecd07a252dc417b9a0df525294bbcd7f9942e1df0edc0bbfd30ac"
+  },
+  "jobs": {
+    "cpp": [
+      "flagcv-imgproc-stage1-perf-h20/batch-matrix-h20.json"
+    ],
+    "python": [
+      "flagcv-imgproc-stage1-perf-h20/batch-matrix-h20.json"
+    ]
+  },
+  "original_samples": {
+    "cpp": [
+      "flagcv-imgproc-stage1-perf-h20/cpp-batch-matrix.log",
+      "flagcv-imgproc-stage1-perf-h20/batch-matrix.json",
+      "flagcv-imgproc-stage1-perf-h20/run-batch-affected.sh",
+      "flagcv-imgproc-stage1-perf-h20/final-build-and-evidence.sha256",
+      "flagcv-imgproc-stage1-perf-h20/canonical-identity.txt"
+    ],
+    "python": [
+      "flagcv-imgproc-stage1-perf-h20/python-batch-matrix.log",
+      "flagcv-imgproc-stage1-perf-h20/batch-matrix.json",
+      "flagcv-imgproc-stage1-perf-h20/run-batch-affected.sh",
+      "flagcv-imgproc-stage1-perf-h20/final-build-and-evidence.sha256",
+      "flagcv-imgproc-stage1-perf-h20/canonical-identity.txt"
+    ]
+  },
+  "cases": [
+    {"operator":"resizeBatch","cpp":"batch-00","python":"batch-00","parameters":{"count":3,"channels":1,"mode":0,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-01","python":"batch-01","parameters":{"count":3,"channels":1,"mode":0,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-02","python":"batch-02","parameters":{"count":3,"channels":1,"mode":1,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-03","python":"batch-03","parameters":{"count":3,"channels":1,"mode":1,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-04","python":"batch-04","parameters":{"count":3,"channels":1,"mode":2,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-05","python":"batch-05","parameters":{"count":3,"channels":1,"mode":2,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-06","python":"batch-06","parameters":{"count":3,"channels":1,"mode":3,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-07","python":"batch-07","parameters":{"count":3,"channels":1,"mode":3,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-08","python":"batch-08","parameters":{"count":3,"channels":3,"mode":0,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-09","python":"batch-09","parameters":{"count":3,"channels":3,"mode":0,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-10","python":"batch-10","parameters":{"count":3,"channels":3,"mode":1,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-11","python":"batch-11","parameters":{"count":3,"channels":3,"mode":1,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-12","python":"batch-12","parameters":{"count":3,"channels":3,"mode":2,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-13","python":"batch-13","parameters":{"count":3,"channels":3,"mode":2,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-14","python":"batch-14","parameters":{"count":3,"channels":3,"mode":3,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-15","python":"batch-15","parameters":{"count":3,"channels":3,"mode":3,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-16","python":"batch-16","parameters":{"count":3,"channels":4,"mode":0,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-17","python":"batch-17","parameters":{"count":3,"channels":4,"mode":0,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-18","python":"batch-18","parameters":{"count":3,"channels":4,"mode":1,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-19","python":"batch-19","parameters":{"count":3,"channels":4,"mode":1,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-20","python":"batch-20","parameters":{"count":3,"channels":4,"mode":2,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-21","python":"batch-21","parameters":{"count":3,"channels":4,"mode":2,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-22","python":"batch-22","parameters":{"count":3,"channels":4,"mode":3,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-23","python":"batch-23","parameters":{"count":3,"channels":4,"mode":3,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-24","python":"batch-24","parameters":{"count":8,"channels":1,"mode":0,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-25","python":"batch-25","parameters":{"count":8,"channels":1,"mode":0,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-26","python":"batch-26","parameters":{"count":8,"channels":1,"mode":1,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-27","python":"batch-27","parameters":{"count":8,"channels":1,"mode":1,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-28","python":"batch-28","parameters":{"count":8,"channels":1,"mode":2,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-29","python":"batch-29","parameters":{"count":8,"channels":1,"mode":2,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-30","python":"batch-30","parameters":{"count":8,"channels":1,"mode":3,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-31","python":"batch-31","parameters":{"count":8,"channels":1,"mode":3,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-32","python":"batch-32","parameters":{"count":8,"channels":3,"mode":0,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-33","python":"batch-33","parameters":{"count":8,"channels":3,"mode":0,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-34","python":"batch-34","parameters":{"count":8,"channels":3,"mode":1,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-35","python":"batch-35","parameters":{"count":8,"channels":3,"mode":1,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-36","python":"batch-36","parameters":{"count":8,"channels":3,"mode":2,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-37","python":"batch-37","parameters":{"count":8,"channels":3,"mode":2,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-38","python":"batch-38","parameters":{"count":8,"channels":3,"mode":3,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-39","python":"batch-39","parameters":{"count":8,"channels":3,"mode":3,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-40","python":"batch-40","parameters":{"count":8,"channels":4,"mode":0,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-41","python":"batch-41","parameters":{"count":8,"channels":4,"mode":0,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-42","python":"batch-42","parameters":{"count":8,"channels":4,"mode":1,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-43","python":"batch-43","parameters":{"count":8,"channels":4,"mode":1,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-44","python":"batch-44","parameters":{"count":8,"channels":4,"mode":2,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-45","python":"batch-45","parameters":{"count":8,"channels":4,"mode":2,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-46","python":"batch-46","parameters":{"count":8,"channels":4,"mode":3,"sw":640,"sh":360,"dw":320,"dh":180,"fx":0,"fy":0,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}},
+    {"operator":"resizeBatch","cpp":"batch-47","python":"batch-47","parameters":{"count":8,"channels":4,"mode":3,"sw":31,"sh":17,"dw":0,"dh":0,"fx":0.64,"fy":1.31,"source_extra_rows":3,"destination_extra_rows":5,"source_extra_cols":5,"destination_extra_cols":7}}
+  ]
 }
 ]}

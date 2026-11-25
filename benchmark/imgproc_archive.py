@@ -1,6 +1,8 @@
 """Replay already classified Imgproc records without re-attributing timing."""
 from collections import defaultdict
+import csv
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
@@ -60,7 +62,8 @@ def normalize(raw_class, ratios, relative, source, background=None, record=None)
         if record.get("error"):
             result["opencv_cuda"]["diagnostic"] = record["error"]
         for name in ("return_contract", "event_us", "native_sync_wall_us", "median",
-                     "flagcv_us", "opencv_cuda_us", "sample_extent"):
+                     "flagcv_us", "opencv_cuda_us", "sample_extent",
+                     "flagcv_launches", "opencv_cuda_launches"):
             if name in record:
                 result[name] = record[name]
     if raw_class == "comparable" and not formal:
@@ -118,7 +121,25 @@ def geometry_large(payload):
         yield dict(case=case, classification=category, protocol=background, ratios=ratios)
 
 
+def batch_cpp(payload):
+    by_id = defaultdict(list)
+    for row in csv.DictReader(io.StringIO(payload)):
+        by_id[row["id"]].append(row)
+    for case, rows in by_id.items():
+        if [int(row["sample"]) for row in rows] != list(range(11)):
+            raise ValueError(f"bad C++ batch sample count: {case}")
+        identical = all(float(row["cuda_cpu_max_abs"]) == 0.0 for row in rows)
+        ratios = {
+            metric: median(float(row[f"cuda_{metric}_us"]) for row in rows) /
+            median(float(row[f"flagcv_{metric}_us"]) for row in rows)
+            for metric in ("event", "wall")
+        } if identical else {}
+        yield dict(case=case, classification="COMPARABLE" if identical else "SEMANTICS_DIFFER", ratios=ratios)
+
+
 def read_cpp_group(group_id, payload):
+    if group_id == "resize-batch":
+        return batch_cpp(payload)
     if group_id == "geometry-large":
         return geometry_large(payload)
     summary = json.loads(payload)
@@ -149,7 +170,18 @@ def read_group(group, payloads):
     for path in group["python"]:
         if payloads[path] is None:
             continue
-        for row in read_jsonl(payloads[path]):
+        if group["id"] == "resize-batch":
+            batch_count = {row["python"]:row["parameters"]["count"] for row in group["cases"]}
+            observations = [json.loads(line) for line in payloads[path].splitlines() if line.strip()]
+            for row in observations:
+                if (row["flagcv_launches"] != 1 or row["opencv_cuda_launches"] != batch_count[row["id"]]
+                        or len(row["pairs"]) != 2):
+                    raise ValueError(f"invalid resizeBatch launch evidence: {row['id']}")
+                row["classification"] = "COMPARABLE" if row["cuda_cpu_max_abs"] == 0 else "SEMANTICS_DIFFER"
+                row["ratio"] = row["opencv_cuda_us"] / row["flagcv_us"]
+        else:
+            observations = read_jsonl(payloads[path])
+        for row in observations:
             metrics = {"event": row["ratio"]} if row.get("ratio") is not None else {}
             add_row(entries["python"], row["id"], normalize(
                 CLASSES[row["classification"]], metrics, path, group["source"],

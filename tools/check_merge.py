@@ -278,7 +278,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="a new evidence directory")
     parser.add_argument("--imgproc-evidence", type=Path, help="root of the archived H20 runs")
     parser.add_argument("--imgproc-scope", action="append",
-                        choices=("all", "first-batch", "geometry-small", "geometry-large", "arithmetic-filters"))
+                        choices=("all", "first-batch", "geometry-small", "geometry-large", "arithmetic-filters", "resize-batch"))
     parser.add_argument("--opencv-dir", type=Path, help="OpenCV CMake package directory for NVIDIA")
     parser.add_argument("--python-benchmark-profile", choices=tuple(PROFILES), default="default")
     args = parser.parse_args()

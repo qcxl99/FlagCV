@@ -15,6 +15,10 @@ include(CTest)
 
 option(BUILD_SHARED_LIBS "Build the relocatable FlagCV shared runtime" ON)
 option(FLAGCV_BUILD_TESTS "Build FlagCV tests" ${BUILD_TESTING})
+option(FLAGCV_BENCHMARK_IMGPROC "Build relocatable live NVIDIA Imgproc benchmarks" OFF)
+if(FLAGCV_BENCHMARK_IMGPROC AND NOT FLAGCV_BUILD_TESTS)
+  message(FATAL_ERROR "FLAGCV_BENCHMARK_IMGPROC needs the shared FlagCV test fixtures")
+endif()
 option(FLAGCV_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 
 set(FLAGCV_BACKENDS "nvidia"
@@ -36,6 +40,7 @@ install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv")
 
 install(FILES benchmark/check_nvidia.py benchmark/nvidia_cases.json
               benchmark/imgproc_archive.py benchmark/imgproc_archive_cases.json
+              benchmark/imgproc_live.py
   DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/benchmark")
 install(FILES helpers/benchmark_protocol.py
   DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/helpers")

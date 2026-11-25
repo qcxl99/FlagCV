@@ -127,3 +127,26 @@ python "$PREFIX/share/flagcv/benchmark/check_nvidia.py" \
 失败会使该分组检查失败。全组为 `all`，可用 `geometry-large`
 等更窄的分组。合并检查使用 `--imgproc-evidence` 时同时指定
 `--imgproc-scope`。该检查只证明历史分组达到其验证条件。
+
+## 从迁移安装运行 Imgproc
+
+在 NVIDIA 构建时启用 `FLAGCV_BENCHMARK_IMGPROC` 和 `FLAGCV_BUILD_TESTS`，
+并提供带 CUDA 算术、几何、颜色和滤波模块的 OpenCV CMake 包。
+将该 FlagCV 安装迁移到 `PREFIX`。设置 Python 的 Triton 和同一 OpenCV
+环境，在已取得物理设备锁的单张 SM90 卡上运行。
+
+```sh
+python "$PREFIX/share/flagcv/benchmark/check_nvidia.py" \
+  --imgproc-live --prefix "$PREFIX" --case resize-0000 --case batch-00 \
+  --python-benchmark-profile default --summary imgproc-live.json
+```
+
+省略 case 选项会运行九项代表及 Triangle 原生拒绝控制。可选 case 在
+安装目录的 `benchmark/imgproc/cases.json` 中。resizeBatch 有独立的
+48 条参数，FlagCV 每次调用处理整批，原生对照逐图提交。归档组
+`resize-batch` 同样按真实批量用例计数。
+
+C++ 使用安装的公开 API，Python 使用实际安装的 Triton kernel 和计划
+描述。报告保留各自的原始计时和独立 CPU 检查。原生拒绝、输出布局变化
+及语义不同均无正式比值。自动阈值的事件与同步主机返回时间分别记录。
+此入口使用当前安装身份，完整冻结矩阵继续按原始运行身份归档。

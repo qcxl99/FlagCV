@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -197,14 +198,31 @@ def main():
     parser.add_argument("--python", type=Path)
     parser.add_argument("--identity", type=Path)
     parser.add_argument("--imgproc-evidence", type=Path, help="root of the archived H20 runs")
+    parser.add_argument("--imgproc-live", action="store_true", help="run installed Imgproc adapters")
+    parser.add_argument("--prefix", type=Path, help="prefix of the installed live Imgproc package")
+    parser.add_argument("--case", action="append", help="run a selected live Imgproc case; repeatable")
     parser.add_argument("--require-imgproc-scope", action="append",
-                        choices=("all", "first-batch", "geometry-small", "geometry-large", "arithmetic-filters"))
+                        choices=("all", "first-batch", "geometry-small", "geometry-large", "arithmetic-filters", "resize-batch"))
     parser.add_argument("--python-benchmark-profile", choices=tuple(PROFILES), default="default")
     parser.add_argument("--previous-cpp", type=Path)
     parser.add_argument("--previous-python", type=Path)
     parser.add_argument("--previous-identity", type=Path)
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args()
+    if args.imgproc_live:
+        if not args.prefix or any((args.cpp, args.python, args.identity, args.imgproc_evidence,
+                                   args.require_imgproc_scope, args.previous_cpp, args.previous_python, args.previous_identity)):
+            parser.error("--imgproc-live needs --prefix and its own case and profile arguments")
+        from imgproc_live import run_live
+        try:
+            run_live(args.prefix, args.case, args.python_benchmark_profile, args.summary)
+        except subprocess.CalledProcessError as error:
+            parser.error(error.stderr or str(error))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            parser.error(str(error))
+        return
+    if args.prefix or args.case:
+        parser.error("--prefix and --case need --imgproc-live")
     if args.require_imgproc_scope and not args.imgproc_evidence:
         parser.error("--require-imgproc-scope needs --imgproc-evidence")
     if args.imgproc_evidence is not None:

@@ -253,3 +253,7 @@ flagcv_enable_warnings(test_scratch_launch)
 add_test(NAME flagcv.scratch_launch COMMAND test_scratch_launch "${compiler_fixture}")
 set_tests_properties(flagcv.scratch_launch PROPERTIES TIMEOUT 10 LABELS host
   ENVIRONMENT "FLAGCV_DATA_DIR=${compiler_fixture};FLAGCV_PLUGIN_DIR=$<TARGET_FILE_DIR:flagcv_scratch_fixture>;FLAGCV_PYTHON=${Python3_EXECUTABLE};FLAGCV_COMPILER_TIMEOUT_MS=3000")
+
+if(FLAGCV_BENCHMARK_IMGPROC)
+  add_subdirectory("${PROJECT_SOURCE_DIR}/benchmark/imgproc" "${CMAKE_CURRENT_BINARY_DIR}/imgproc-live")
+endif()

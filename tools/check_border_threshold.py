@@ -50,10 +50,10 @@ def border_call(src, dst, pad, mode, constant, dtype):
                 value = -(2**31)
         scalars.extend(words(value, dtype))
     def call():
-        copy_make_border[(triton.cdiv(output_h * row_values, BLOCK),)](
+        return [copy_make_border[(triton.cdiv(output_h * row_values, BLOCK),)](
             src, dst, width, height, output_h, row_values, src.stride(0), dst.stride(0),
             pad[0], pad[2], *scalars, CHANNELS=channels, MODE=mode,
-            BITS=np.dtype(dtype).itemsize * 8, BLOCK=BLOCK)
+            BITS=np.dtype(dtype).itemsize * 8, BLOCK=BLOCK, num_stages=1)]
     return call
 
 
@@ -73,16 +73,18 @@ def threshold_call(src, dst, cutoff, maxval, mode, dtype, work=None, auto=None, 
         scalars = (*words(cutoff, dtype), *words(maxval, dtype))
     bins = 65536 if kind == 1 else 256
     def call():
+        launches = []
         if auto is not None:
-            threshold_clear[(triton.cdiv(bins, BLOCK),)](work, bins, BLOCK=BLOCK)
-            threshold_histogram[grid](src, work, rows, row_values, src.stride(0), BLOCK=BLOCK)
-            threshold_select[(1,)](work, rows * row_values, BINS=bins,
+            launches.append(threshold_clear[(triton.cdiv(bins, BLOCK),)](work, bins, BLOCK=BLOCK, num_stages=1))
+            launches.append(threshold_histogram[grid](src, work, rows, row_values, src.stride(0), BLOCK=BLOCK, num_stages=1))
+            launches.append(threshold_select[(1,)](work, rows * row_values, BINS=bins,
                                    TRIANGLE=auto == cv2.THRESH_TRIANGLE, num_warps=1,
-                                   num_stages=1, enable_fp_fusion=False)
+                                   num_stages=1, enable_fp_fusion=False))
         if not dry:
-            threshold_apply[grid](src, dst, src if work is None else work, rows, row_values,
+            launches.append(threshold_apply[grid](src, dst, src if work is None else work, rows, row_values,
                                   src.stride(0), dst.stride(0), *scalars,
-                                  MODE=mode, KIND=kind, AUTO=auto is not None, BLOCK=BLOCK)
+                                  MODE=mode, KIND=kind, AUTO=auto is not None, BLOCK=BLOCK, num_stages=1))
+        return launches
     return call, cutoff
 
 
