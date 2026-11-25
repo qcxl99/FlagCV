@@ -34,6 +34,12 @@ endfunction()
 
 install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv")
 
+install(FILES benchmark/check_nvidia.py benchmark/nvidia_cases.json
+              benchmark/imgproc_archive.py benchmark/imgproc_archive_cases.json
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/benchmark")
+install(FILES helpers/benchmark_protocol.py
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/helpers")
+
 add_subdirectory(src)
 add_subdirectory(backends)
 

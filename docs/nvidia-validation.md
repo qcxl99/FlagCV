@@ -103,3 +103,20 @@ done
 [2026-11-25 H20 基线](baselines/nvidia-h20-2026-11-25/README.md)。
 
 仓内旧版归档用于复盘，缺少当前协议字段。较新的 1000 ms／三轮证据可在 long 模式下按原身份校验。与默认协议做主分支对比时，用默认协议重测目标基线。
+
+## 重放 Imgproc 已归档证据
+
+使用既有 checker 的 `--imgproc-evidence RUNS_ROOT` 入口。该目录包含
+原 H20 的 `flagcv-imgproc-stage1-perf-h20` 和
+`flagcv-h20-stage2-native-baselines` 子目录。清单随包安装并校验这些
+文件的摘要。将安装目录迁移后，可从任意目录运行下列命令。
+
+```sh
+python "$PREFIX/share/flagcv/benchmark/check_nvidia.py" \
+  --imgproc-evidence "$RUNS_ROOT" --summary imgproc-archive-summary.json
+```
+
+输出保留九项的逐例 C++ 与 Python 记录及原始运行身份。可比速度比、
+原生拒绝、语义差异、候选与 CPU 差异和缺项分别记录。自动阈值设备
+结果与同步主机返回的计时单列。档案入口复核历史数据。
+实时 NVIDIA 六项沿用原命令。合并检查可用同名选项附加归档复核。

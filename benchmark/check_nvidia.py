@@ -193,15 +193,31 @@ def summarize(name, rows, previous=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cpp", type=Path, required=True)
-    parser.add_argument("--python", type=Path, required=True)
+    parser.add_argument("--cpp", type=Path)
+    parser.add_argument("--python", type=Path)
     parser.add_argument("--identity", type=Path)
+    parser.add_argument("--imgproc-evidence", type=Path, help="root of the archived H20 runs")
     parser.add_argument("--python-benchmark-profile", choices=tuple(PROFILES), default="default")
     parser.add_argument("--previous-cpp", type=Path)
     parser.add_argument("--previous-python", type=Path)
     parser.add_argument("--previous-identity", type=Path)
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args()
+    if args.imgproc_evidence is not None:
+        if any((args.cpp, args.python, args.identity, args.previous_cpp,
+                args.previous_python, args.previous_identity)):
+            parser.error("Imgproc archive intake uses its own evidence, without live comparison arguments")
+        from imgproc_archive import load_archive
+        try:
+            report = load_archive(args.imgproc_evidence)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            parser.error(str(error))
+        print(json.dumps(report["counts"], indent=2))
+        if args.summary:
+            args.summary.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        return
+    if not args.cpp or not args.python:
+        parser.error("--cpp and --python are required for the live NVIDIA checker")
     protocol = PROFILES[args.python_benchmark_profile]
     try:
         cases = load_json(MANIFEST)
