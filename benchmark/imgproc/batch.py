@@ -130,9 +130,9 @@ def run_case(row):
         scorer = statistics.mean if args.profile=="default" else statistics.median
         flag = scorer(p["flagcv"] for p in pairs)
         native_us = scorer(p["opencv_cuda"] for p in pairs) if diagnostic is None else None
-        state = "NATIVE_REFUSED" if diagnostic else "COMPARABLE" if native_delta == 0 else "SEMANTICS_DIFFER"
-        return dict(classification=state, pairs=pairs, flagcv_us=flag, opencv_cuda_us=native_us,
-                    ratio=native_us/flag if state=="COMPARABLE" else None,
+        classification = "NATIVE_REFUSED" if diagnostic else "COMPARABLE" if native_delta == 0 else "SEMANTICS_DIFFER"
+        return dict(classification=classification, pairs=pairs, flagcv_us=flag, opencv_cuda_us=native_us,
+                    ratio=native_us/flag if classification=="COMPARABLE" else None,
                     launch=dict(kernel=req["kernel"],grid=grid,tile=tune,hash=compiled.hash,
                                 num_warps=compiled.metadata.num_warps,num_stages=compiled.metadata.num_stages,
                                 enable_fp_fusion=compiled.metadata.enable_fp_fusion),
