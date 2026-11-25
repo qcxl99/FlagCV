@@ -167,7 +167,12 @@ def plan_threshold_clear(request, facts):
 
 
 def plan_threshold_select(request, facts):
-    return {}, 1, [1, 1, 1]
+    params = {param["name"]: param.get("value") for param in request["params"]}
+    gfx1100 = request["backend"] == "hip" and request["target"] == "hip:gfx1100:32"
+    return {
+        "OTSU_TILE": 32 if gfx1100 and params["BINS"] == 65536 and not params["TRIANGLE"] else 0,
+        "TRIANGLE_VECTOR": gfx1100 and bool(params["TRIANGLE"]),
+    }, 1, [1, 1, 1]
 
 
 def plan_spatial_filter(request, facts):
