@@ -8,6 +8,7 @@
 #include "resize_reference.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -58,19 +59,31 @@ cv::Mat reference(const cv::Mat& src, Size size, const ResizeOptions& options) {
   return dst;
 }
 
-void compare(const cv::Mat& actual, const cv::Mat& expected, Interpolation mode) {
-  if (expected.depth() == CV_8U || mode == Interpolation::kNearest) {
+void compare(const cv::Mat& actual, const cv::Mat& expected, Interpolation mode,
+             bool copy = false) {
+  require(actual.size() == expected.size() && actual.type() == expected.type(),
+          "resize result layout differs");
+  if (expected.depth() == CV_8U || mode == Interpolation::kNearest || copy) {
     require(bytes_equal(actual, expected), "resize pixel bits differ");
   } else {
     const double bound = mode == Interpolation::kLinear ? 4.948e-7 :
         mode == Interpolation::kCubic ? 1.401e-6 : 8.419e-7;
-    const auto error = cv::norm(actual, expected, cv::NORM_INF);
-    require(error <= bound, "resize FP32 delta " + std::to_string(error));
+    for (int y = 0; y < expected.rows; ++y) {
+      const float* got = actual.ptr<float>(y);
+      const float* ref = expected.ptr<float>(y);
+      for (int x = 0; x < expected.cols * expected.channels(); ++x) {
+        require(std::isfinite(got[x]) && std::isfinite(ref[x]),
+                "resize finite-input comparison found a nonfinite pixel");
+        const double error = std::abs(double(got[x]) - ref[x]);
+        require(error <= bound, "resize FP32 delta " + std::to_string(error));
+      }
+    }
   }
 }
 
-void compare_roi(const Image& image, cv::Mat actual, const cv::Mat& expected, Interpolation mode) {
-  compare(actual(image.roi), expected, mode);
+void compare_roi(const Image& image, cv::Mat actual, const cv::Mat& expected,
+                 Interpolation mode, bool copy = false) {
+  compare(actual(image.roi), expected, mode, copy);
   image.pixels().copyTo(actual(image.roi));
   require(bytes_equal(actual, image.host), "resize wrote outside its destination ROI");
 }
@@ -97,9 +110,27 @@ void run_case(flagcv::Handle& handle, const Stream& native, const Stream& second
   native.wait();  // Both streams may use the same immutable uploaded coefficients.
   flagcv::resize(handle, src.view(), one.view(), plan, tables.view(), native.value);
   flagcv::resize(handle, src.view(), two.view(), plan, tables.view(), second.value);
-  compare_roi(one, one.download(native), oracle, options.interpolation);
-  compare_roi(two, two.download(second), oracle, options.interpolation);
+  const bool copy = in.width == out.width && in.height == out.height;
+  compare_roi(one, one.download(native), oracle, options.interpolation, copy);
+  compare_roi(two, two.download(second), oracle, options.interpolation, copy);
   require(bytes_equal(src.host, src.download(native)), "resize changed its source bytes");
+}
+
+void check_float_comparator() {
+  cv::Mat expected(1, 5, CV_32FC1, cv::Scalar(0.5));
+  cv::Mat invalid = expected.clone();
+  invalid.at<float>(0, 4) = std::numeric_limits<float>::quiet_NaN();
+  try {
+    compare(invalid, expected, Interpolation::kLinear);
+  } catch (const std::runtime_error& error) {
+    require(std::string_view(error.what()) == "resize finite-input comparison found a nonfinite pixel",
+            "resize comparator rejected the injected NaN for the wrong reason");
+    // The same bits are legal for a COPY, including the NaN payload.
+    compare(invalid, invalid.clone(), Interpolation::kLinear, true);
+    std::cout << "resize comparator rejected injected NaN and preserved COPY bytes\n";
+    return;
+  }
+  throw std::runtime_error("resize comparator accepted an injected NaN");
 }
 
 flagcv::GpuMat subview(const Image& backing, const cv::Rect& roi) {
@@ -268,6 +299,8 @@ void check_wide_area_sum(flagcv::Handle& handle, const Stream& stream) {
 
 int main(int argc, char** argv) {
   try {
+    check_float_comparator();
+    if (argc == 2 && std::string_view(argv[1]) == "--comparator") return 0;
 #ifdef FLAGCV_TEST_HIP
     flagcv::Handle handle("hip");
 #else
