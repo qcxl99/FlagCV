@@ -23,9 +23,31 @@ WRAP、TRANSPARENT。透明 LINEAR 以已初始化目标像素补足缺失的插
 会拒绝。矩阵及边框必须有限且处于所选运算的索引范围。
 数值参考与固定 CPU 配置见 [数值验收](numerical-tolerance.md)。
 
-CUDA 逐例基线覆盖已核对的共同支持范围。16F、C++ 掩码、原地操作、非单位
+OpenCV CUDA 逐例对照覆盖已核对的共同支持范围。16F、C++ 掩码、原地操作、非单位
 缩放和其他位运算深度的本轮证据见功能矩阵。并行推进算子时按 PR 登记具体负责人。
 本轮逐例结果和环境见 [NVIDIA 验收](nvidia-validation.md)。
+
+## 透视与重映射
+
+| 算子 | 已实现的 C++ 入口和范围 |
+| --- | --- |
+| `warpPerspective` | `flagcv::warpPerspective`，支持正向或逆向 3×3 矩阵 |
+| `remap` | `flagcv::remap`，支持交错或双图浮点坐标、定点图和相对坐标 |
+
+两项均通过 `<flagcv/imgproc.hpp>` 公开，支持 8U/16U/32F 的 C1/C3/C4、
+独立行距与 ROI、NEAREST、LINEAR 和 CUBIC。AREA 使用 LINEAR。支持六种
+边框，透明边框要求预先初始化目标。具体坐标图格式、尺寸和拒绝条件见
+[C++ 接口](cpp-operators.md#warpperspective-and-remap)。
+
+H20 已在迁移安装包上验证公开 C++ 与 Python kernel。C++ 验证入口为
+`flagcv.nvidia.projective`，以及树外通过 `find_package(FlagCV)` 链接迁移包的
+消费者。Python 通过 `pytest tests/test_projective.py` 直接 JIT 执行 Triton
+kernel，设置 `FLAGCV_PROJECTIVE_DATA` 和 `FLAGCV_PROJECTIVE_KERNELS` 可从迁移包
+加载 provider 和 kernel。
+
+BW1000（gfx936）、BW1101（gfx938）和 W7900D（gfx1100）的统一源码实卡验收
+待完成。HIP 的公开 C++ 验证入口为 `flagcv.hip.projective`，Python 使用同一测试文件。
+W7900D 的 `af4cfec` 候选有单独实卡证据。
 
 共享 HIP 后端已有 Core 算子的公开接口和数值标准。W7900D（gfx1100）
 与 BW1000（gfx936）有单卡公开 API 和 Python 正确性证据。BW1101
@@ -37,7 +59,6 @@ CUDA 逐例基线覆盖已核对的共同支持范围。16F、C++ 掩码、原�
 | 顺序 | 范围 | 状态 |
 | --- | --- | --- |
 | 1 | `bitwise_or`、`bitwise_xor`、`compare`、`min`、`max` | OR/XOR/min/max 有独立评测 PR 提案；公开 API 和验收待接入 |
-| 2 | `warpPerspective`、`remap` | 优先复用已有 Triton 和 OpenCV 工作；按插值及边界模式建立 CPU 和 CUDA 基线 |
 
 AMD 新工具链与新设备继续按 HIP 交付流程验证。[AMD PR #3](https://github.com/flagos-ai/FlagCV/pull/3)
 
