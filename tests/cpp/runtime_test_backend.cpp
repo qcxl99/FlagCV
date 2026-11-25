@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -55,10 +56,19 @@ void unload(void* raw, void* handle) {
 }
 
 int launch(void* raw, void* handle, const unsigned int grid[3],
-           unsigned int, unsigned int, void* stream, void**, const unsigned int*, unsigned int) {
+           unsigned int, unsigned int, void* stream, void** args, const unsigned int* kinds, unsigned int count) {
   const auto device = static_cast<Context*>(raw)->device;
   auto* kernel = static_cast<Kernel*>(handle);
   if (kernel->device != device) return 1;
+  if (kernel->symbol == "_warp_nearest") {
+    if (count != 18 || kinds[0] != 0 || kinds[1] != 0) return 1;
+    for (unsigned int i = 2; i < count; ++i)
+      if (kinds[i] != 1) return 1;
+    std::ostringstream values;
+    for (int i : {2, 3, 4, 5, 6, 7, 14, 15, 16, 17})
+      values << ' ' << *static_cast<float*>(args[i]);
+    trace("fp32", device, values.str());
+  }
   trace("launch", device, " " + kernel->symbol + " " + std::to_string(grid[0]) +
                               (stream ? " custom" : " default"));
   return 0;

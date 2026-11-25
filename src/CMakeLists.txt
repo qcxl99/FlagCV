@@ -5,8 +5,10 @@ add_library(flagcv
   core/bitwise.cpp
   core/flip.cpp
   image/gpumat.cpp
+  imgproc/warpaffine.cpp
   lowering/flip.cpp
   lowering/pointwise.cpp
+  lowering/warpaffine.cpp
   runtime/compiler_client.cpp
   runtime/json.cpp
   runtime/paths.cpp

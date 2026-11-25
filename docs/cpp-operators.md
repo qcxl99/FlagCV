@@ -41,3 +41,16 @@ See [Architecture](architecture.md) for the compiler protocol, cache and plugin
 boundary, and [Operator development](operator-development.md) for the steps to connect a
 Triton operator to a C++ interface, lowering, kernel registry, compilation
 plan and backend launch.
+
+
+## warpAffine
+
+```cpp
+const flagcv::AffineMatrix matrix{1.0, 0.0, 12.0, 0.0, 1.0, -4.5};
+flagcv::warpAffine(handle, src, dst, matrix, flagcv::Interpolation::kLinear,
+                   flagcv::Border::kConstant, {}, false, stream);
+```
+
+调用方按所需输出尺寸预分配 `dst`。矩阵按行给出，`inverse_map` 为真时直接
+从目标映射到源坐标。调用方保留句柄、视图存储和原生 stream，直到提交完成。
+仿射路径使用调用方给定的图像存储，暖态每次调用提交一个 kernel。

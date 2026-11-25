@@ -50,6 +50,21 @@
       "name": "bitwise_not_masked",
       "source": "common/pointwise.py",
       "function": "masked_pointwise_kernel"
+    },
+    {
+      "name": "warp_affine_nearest",
+      "source": "common/warpaffine.py",
+      "function": "_warp_nearest"
+    },
+    {
+      "name": "warp_affine_linear",
+      "source": "common/warpaffine.py",
+      "function": "_warp_linear"
+    },
+    {
+      "name": "warp_affine_cubic",
+      "source": "common/warpaffine.py",
+      "function": "_warp_cubic"
     }
   ]
 }

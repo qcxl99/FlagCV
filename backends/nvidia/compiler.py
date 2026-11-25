@@ -59,7 +59,7 @@ def compile(request):
                 tuning.update(BLOCK_X=256, BLOCK_Y=4)
             grid[0]["block"] = tuning["BLOCK_X"]
             grid[1]["block"] = tuning["BLOCK_Y"]
-        if isinstance(grid[1], dict):
+        if "ROW_GRID_LIMIT" in tuning and isinstance(grid[1], dict):
             # CUDA limits grid Y and Z to 65535 each. The pitched kernels
             # fold extra groups of rows into Z to preserve tall views.
             row_limit = 65535

@@ -31,6 +31,19 @@ class ScratchABI(unittest.TestCase):
                                        "triton.backends.hcu.compiler_hcu")
         self.assertEqual(validated_scratch_args(ZERO, PTX, SIGNATURE), 2)
 
+    def test_runtime_fp32_entry(self):
+        signature = dict(SIGNATURE, width="fp32")
+        ptx = PTX.replace(".u32 sample_param_1", ".f32 sample_param_1")
+        self.assertEqual(validated_scratch_args(ZERO, ptx, signature), 2)
+        with self.assertRaisesRegex(RuntimeError, "entry parameter ABI"):
+            validated_scratch_args(ZERO, PTX, signature)
+        llir = ("define amdgpu_kernel void @sample(ptr addrspace(1) inreg %0, "
+                "float inreg %1, ptr addrspace(1) inreg readnone %2, "
+                "ptr addrspace(1) inreg readnone %3) #0 {")
+        self.assertEqual(validated_hip_scratch_args(ZERO, llir, signature), 2)
+        with self.assertRaisesRegex(RuntimeError, "HIP entry ABI"):
+            validated_hip_scratch_args(ZERO, llir.replace("float", "i32"), signature)
+
     def test_unqualified_compiler_or_platform(self):
         for identity in (("nvidia", "cuda", "3.7.0"), ("hygon", "hip", "3.6.0"),
                          ("ascend", "npu", "3.6.0"), ("mthreads", "mtgpu", "3.6.0"),

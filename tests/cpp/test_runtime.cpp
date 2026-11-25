@@ -82,12 +82,39 @@ void exercise(const std::filesystem::path& directory) {
                        "unload 1 platform_add", "unload 1 " + not_symbol, "destroy 1"},
               "unexpected load/launch/unload/context sequence");
 }
+
+void exercise_fp32(const std::filesystem::path& directory) {
+  const auto backend = directory / "backend.trace";
+  const auto compiler = directory / "compiler.trace";
+  std::ofstream{backend};
+  std::ofstream{compiler};
+  alignas(16) std::array<unsigned char, 128> input{}, output{};
+  const flagcv::GpuMat src(input.data(), 32, 2, flagcv::Depth::k8U, 1, 64);
+  const flagcv::GpuMat dst(output.data(), 32, 2, flagcv::Depth::k8U, 1, 64);
+  flagcv::Handle handle("testfixture", 0);
+  const auto run = [&](const flagcv::AffineMatrix& matrix, const flagcv::BorderValue& value) {
+    flagcv::warpAffine(handle, src, dst, matrix, flagcv::Interpolation::kNearest,
+                       flagcv::Border::kConstant, value, true);
+  };
+  run({1, 0.25, -3.5, 0.125, 2, 8}, {3, 9, 255, 2.5});
+  run({2, -0.125, 0, 0.25, -1, 1}, {2.5, 255, 9, 3});
+  check_trace(lines(compiler), {"warp_affine_nearest common _warp_nearest"},
+              "runtime float values should reuse a single compile");
+  check_trace(lines(backend), {"create 0", "load 0 _warp_nearest",
+                               "fp32 0 1 0.25 -3.5 0.125 2 8 3 9 255 2",
+                               "launch 0 _warp_nearest 2 default",
+                               "fp32 0 2 -0.125 0 0.25 -1 1 2 255 9 3",
+                               "launch 0 _warp_nearest 2 default"},
+              "incorrect packed float arguments or cached launch");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "expected fixture directory");
     exercise(argv[1]);
+    exercise_fp32(argv[1]);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

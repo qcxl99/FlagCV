@@ -3,7 +3,7 @@
 #ifndef FLAGCV_SRC_LOWERING_LOWERING_HPP_
 #define FLAGCV_SRC_LOWERING_LOWERING_HPP_
 
-#include <flagcv/gpumat.hpp>
+#include <flagcv/imgproc.hpp>
 
 #include "src/image/types.hpp"
 
@@ -14,7 +14,7 @@ namespace flagcv {
 
 /*
  * Result of lowering one operator call: validated operands plus the kernel's
- * integer arguments.
+ * scalar arguments.
  *
  * Lowering checks public semantics only. Block sizes, shared memory and grid
  * extents are platform properties decided by the platform compiler, so adding
@@ -27,7 +27,7 @@ namespace flagcv {
  */
 struct LoweredOp {
   /*
-   * One integer kernel argument. A compile-time param becomes a Triton
+   * One scalar kernel argument. A compile-time param becomes a Triton
    * constexpr: its value enters the kernel cache key and each new value
    * compiles a new kernel. A runtime param is passed at launch: only its type
    * enters the key, so new values (image sizes, strides) reuse the kernel.
@@ -46,6 +46,8 @@ struct LoweredOp {
      * groups). Not for other extents, where it only doubles the variants.
      */
     bool divisibility_hint = false;
+    float fp32_value = 0;
+    bool is_fp32 = false;
   };
 
   /* Registry key naming the kernel to resolve. */
@@ -55,7 +57,7 @@ struct LoweredOp {
   std::vector<ImageSpec> images;
 
   /*
-   * Integer kernel arguments, in kernel argument order after the image
+   * Scalar kernel arguments, in kernel argument order after the image
    * pointers. Row strides here are in elements, not bytes.
    */
   std::vector<Param> params;
@@ -69,6 +71,10 @@ struct LoweredOp {
   /* A runtime param that also specialises on % 16; see divisibility_hint. */
   void add_hinted_param(const char* name, std::int64_t value) {
     params.push_back(Param{name, value, false, true});
+  }
+
+  void add_fp32_param(const char* name, float value) {
+    params.push_back(Param{name, 0, false, false, value, true});
   }
 
   void add_constexpr(const char* name, std::int64_t value) {
@@ -91,6 +97,11 @@ LoweredOp lower_pointwise(const GpuMat& src1, const GpuMat& src2,
 
 /* flip: flip_code == 0 mirrors rows, > 0 mirrors columns, < 0 both. */
 LoweredOp lower_flip(const GpuMat& src, const GpuMat& dst, int flip_code);
+
+LoweredOp lower_warp_affine(const GpuMat& src, const GpuMat& dst,
+                           const AffineMatrix& matrix, Interpolation interpolation,
+                           Border border, const BorderValue& border_value,
+                           bool inverse_map);
 
 }  // namespace flagcv
 

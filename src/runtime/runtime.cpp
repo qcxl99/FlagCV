@@ -138,8 +138,9 @@ bool fits_i32(std::int64_t value) {
 
 /* Runtime params are specialised on width, and on divisibility by 16 when
  * the lowering asked for it (LoweredOp::Param::divisibility_hint). */
-const char* runtime_type(std::int64_t value) {
-  return fits_i32(value) ? "i32" : "i64";
+const char* runtime_type(const LoweredOp::Param& param) {
+  if (param.is_fp32) return "fp32";
+  return fits_i32(param.value) ? "i32" : "i64";
 }
 bool divisible16(const LoweredOp::Param& param) {
   return param.divisibility_hint && param.value % 16 == 0;
@@ -153,6 +154,7 @@ std::int64_t signature_value(const ImageSpec& image) {
 std::int64_t signature_value(const LoweredOp::Param& param) {
   // For each registry name, the ordering and constexpr positions are fixed
   // by lowering. Runtime values contribute their ABI and alignment only.
+  if (param.is_fp32) return 4;  // integer ABI/alignment signatures occupy 0..3
   return param.compile_time ? param.value
                             : (fits_i32(param.value) << 1) | divisible16(param);
 }
@@ -305,7 +307,7 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
       if (param.compile_time)
         body << ",\"type\":\"constexpr\",\"value\":" << param.value << "}";
       else
-        body << ",\"type\":\"" << runtime_type(param.value)
+        body << ",\"type\":\"" << runtime_type(param)
              << "\",\"div16\":" << (divisible16(param) ? "true" : "false")
              << "}";
     }
@@ -341,7 +343,7 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
         const auto name = item.as_string();
         auto param = std::find_if(op.params.begin(), op.params.end(),
                                   [&](const auto& p) { return p.name == name; });
-        if (param == op.params.end())
+        if (param == op.params.end() || param->is_fp32)
           throw Error("flagcv: grid refers to unknown param '" + name + "'");
         loaded.grid[d].product.push_back(std::distance(op.params.begin(), param));
       }
@@ -402,9 +404,12 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
     args.push_back(&image.address);
     kinds.push_back(0);
   }
-  for (const auto& param : op.params) {
+  for (auto& param : op.params) {
     if (param.compile_time) continue;  // baked into the binary, not an argument
-    if (fits_i32(param.value)) {
+    if (param.is_fp32) {
+      args.push_back(&param.fp32_value);
+      kinds.push_back(1);
+    } else if (fits_i32(param.value)) {
       narrow.push_back(static_cast<std::int32_t>(param.value));
       args.push_back(&narrow.back());
       kinds.push_back(1);

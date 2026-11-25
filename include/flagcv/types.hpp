@@ -38,6 +38,7 @@ enum class Border {
   /* Reflect without repeating the edge pixel. */
   kReflect101,
   kWrap,
+  kTransparent,
 };
 
 /*

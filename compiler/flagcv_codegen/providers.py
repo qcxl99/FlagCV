@@ -77,6 +77,22 @@ def plan_pointwise(request, facts=None):
     return tuning, warps, grid
 
 
+def plan_warp_affine(request, facts):
+    nearest = request["kernel"] == "warp_affine_nearest"
+    block_h, block_w = (1, 128) if nearest else (1, 64)
+    col_limit = 65535 if facts["triton_backend"] in ("cuda", "hip") else 0
+    grid = [
+        {"product": ["dst_h"], "block": block_h},
+        {"product": ["dst_w"], "block": block_w},
+        1,
+    ]
+    if col_limit:
+        grid[1]["limit"] = col_limit
+        grid[2] = {"product": ["dst_w"], "block": block_w * col_limit}
+    tuning = {"BLOCK_H": block_h, "BLOCK_W": block_w, "COL_GRID_LIMIT": col_limit}
+    return tuning, min(4, facts["max_warps"]), grid
+
+
 PLANS = dict.fromkeys(
     (
         "add", "subtract", "multiply", "bitwise_and", "bitwise_not",
@@ -85,6 +101,8 @@ PLANS = dict.fromkeys(
     plan_pointwise,
 )
 PLANS["flip"] = plan_flip
+for mode in ("nearest", "linear", "cubic"):
+    PLANS[f"warp_affine_{mode}"] = plan_warp_affine
 
 
 def compile_with_plan(request):

@@ -153,9 +153,9 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         if param["type"] == "constexpr":
             signature[param["name"]] = "constexpr"
             constexprs[param["name"]] = param["value"]
-        elif param["type"] in ("i32", "i64"):
+        elif param["type"] in ("i32", "i64", "fp32"):
             signature[param["name"]] = param["type"]
-            if param.get("div16"):
+            if param["type"] != "fp32" and param.get("div16"):
                 attrs[(len(request["images"]) + offset,)] = [["tt.divisibility", 16]]
         else:
             raise ValueError(f"unsupported parameter type {param['type']!r}")
@@ -171,7 +171,11 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     backend = triton.compiler.make_backend(target)
     require_qualified_compiler(request["backend"], target.backend, triton.__version__,
                                target.arch, type(backend).__module__)
-    options = backend.parse_options({"num_warps": num_warps, "num_stages": num_stages})
+    options = {"num_warps": num_warps, "num_stages": num_stages}
+    if request["kernel"] in ("warp_affine_nearest", "warp_affine_linear", "warp_affine_cubic"):
+        # The CPU reference rounds each uncontracted arithmetic operation.
+        options["enable_fp_fusion"] = False
+    options = backend.parse_options(options)
     # Deliberately no fn.create_binder(): it probes the active driver, which
     # imports torch and initialises a device. ASTSource compilation does not
     # need it, and the explicit target keeps this process device-free.

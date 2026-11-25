@@ -38,6 +38,8 @@ def validated_scratch_args(metadata, ptx, signature):
             expected.append(("u64", True))
         elif kind in ("i32", "i64"):
             expected.append(("u" + kind[1:], False))
+        elif kind == "fp32":
+            expected.append(("f32", False))
         elif kind != "constexpr":
             raise RuntimeError(f"unsupported CUDA kernel launch argument type: {kind}")
     expected.extend([("u64", True), ("u64", True)])
@@ -45,7 +47,7 @@ def validated_scratch_args(metadata, ptx, signature):
     actual = []
     for index, param in enumerate(params):
         match = re.fullmatch(
-            r"\s*\.param\s+\.(u32|u64)(\s+\.ptr\s+\.global\s+\.align\s+\d+)?\s+"
+            r"\s*\.param\s+\.(u32|u64|f32)(\s+\.ptr\s+\.global\s+\.align\s+\d+)?\s+"
             + re.escape(f"{metadata.name}_param_{index}") + r"\s*", param
         )
         if match:
@@ -70,7 +72,7 @@ def validated_hip_scratch_args(metadata, llir, signature):
     if not entry:
         raise RuntimeError("missing compiled HIP kernel entry ABI")
     params = [arg.strip() for arg in entry[1].split(",")]
-    expected = ["ptr addrspace(1)" if kind.startswith("*") else kind
+    expected = ["ptr addrspace(1)" if kind.startswith("*") else ("float" if kind == "fp32" else kind)
                 for kind in signature.values() if kind != "constexpr"]
     expected.extend(["ptr addrspace(1)", "ptr addrspace(1)"])
     if (len(params) != len(expected) or any(not arg.startswith(kind + " ")

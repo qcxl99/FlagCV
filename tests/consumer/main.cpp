@@ -50,6 +50,11 @@ int main() {
     check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
     if (values != std::array<unsigned char, 8>{254, 253, 252, 251, 250, 249, 248, 247})
       throw std::runtime_error("installed bitwise_not returned incorrect output");
+    flagcv::warpAffine(handle, src_view, dst_view, {1, 0, 0, 0, 1, 0},
+                       flagcv::Interpolation::kNearest);
+    check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
+    if (values != std::array<unsigned char, 8>{1, 2, 3, 4, 5, 6, 7, 8})
+      throw std::runtime_error("installed warpAffine returned incorrect output");
     return 0;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';

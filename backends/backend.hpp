@@ -73,7 +73,7 @@ typedef struct FlagcvBackendV2 {
    * in kernel order and including the trailing scratch pointers when
    * appends_scratch_args is set. `kinds` has one entry per element of `args`:
    * 0 for a 64-bit value (a device pointer or an i64), 1 for a 32-bit value
-   * (an i32). Backends that launch through a pointer array ignore `kinds`;
+   * (i32 or fp32). Backends that launch through a pointer array ignore `kinds`;
    * Ascend packs arguments by width and needs it.
    * Must not compile, autotune or synchronize.
    */
