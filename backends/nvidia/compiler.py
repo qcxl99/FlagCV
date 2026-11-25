@@ -46,6 +46,9 @@ def compile(request):
             grid[0]["factor_blocks"] = [1, 256]
         elif request["kernel"] == "cvtcolor_swap_c4":
             tuning["VECTOR4"] = True
+        elif request["kernel"] == "resize_area_polyphase":
+            tuning.update(POLYPHASE=True, BLOCK_H=2, BLOCK_W=128)
+            grid[0]["factor_blocks"] = [2, 256]
         elif request["kernel"] == "resize_area_2tap":
             tuning["UNROLL_TWO_TAPS"] = True
     params = {param["name"]: param for param in request["params"]}

@@ -122,7 +122,8 @@ def plan_projective(request, facts):
 
 
 def plan_resize(request, facts):
-    area = request["kernel"] in ("resize_area", "resize_area_2tap", "resize_area_fast")
+    area = request["kernel"] in ("resize_area", "resize_area_2tap", "resize_area_fast",
+                                 "resize_area_polyphase")
     block_h, block_w = (1, 64) if area else (2, 128)
     batch_limit = 65535 if facts["triton_backend"] in ("cuda", "hip") else 0
     batch = {"product": ["batch_count"], "block": 1}
@@ -134,6 +135,8 @@ def plan_resize(request, facts):
     tuning = {"BLOCK_H": block_h, "BLOCK_W": block_w, "BATCH_GRID_LIMIT": batch_limit}
     if request["kernel"] in ("resize_area", "resize_area_2tap"):
         tuning["UNROLL_TWO_TAPS"] = False
+    if request["kernel"] == "resize_area_polyphase":
+        tuning["POLYPHASE"] = False
     if request["kernel"] == "resize_area_fast":
         tuning["RY"] = 4
     return tuning, min(4, facts["max_warps"]), grid
@@ -198,7 +201,7 @@ PLANS["warp_perspective"] = plan_projective
 PLANS["remap"] = plan_projective
 for mode in ("nearest", "linear", "cubic"):
     PLANS[f"warp_affine_{mode}"] = plan_warp_affine
-for route in ("copy", "nearest", "separable", "area", "area_2tap", "area_fast"):
+for route in ("copy", "nearest", "separable", "area", "area_2tap", "area_fast", "area_polyphase"):
     PLANS[f"resize_{route}"] = plan_resize
 
 

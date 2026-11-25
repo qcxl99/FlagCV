@@ -134,7 +134,10 @@ LoweredOp lower_resize(const GpuMat& src, const GpuMat& dst, const ResizePlan& p
     case ROUTE_AREA_FAST: op.kernel = "resize_area_fast"; break;
     case ROUTE_AREA:
       // Classify from the prepared table, including scale-derived phases.
-      op.kernel = data.kx == 2 && data.ky == 2 ? "resize_area_2tap" : "resize_area";
+      if (data.area_polyphase)
+        op.kernel = "resize_area_polyphase";
+      else
+        op.kernel = data.kx == 2 && data.ky == 2 ? "resize_area_2tap" : "resize_area";
       break;
   }
   if (route == ROUTE_LINEAR || route == ROUTE_CUBIC || route == ROUTE_AREA_FAST) {

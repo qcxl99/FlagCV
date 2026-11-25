@@ -92,6 +92,11 @@
       "function": "_resize_cpu_sep_kernel"
     },
     {
+      "name": "resize_area_polyphase",
+      "source": "common/resize.py",
+      "function": "_resize_area_polyphase_kernel"
+    },
+    {
       "name": "resize_area_fast",
       "source": "common/resize.py",
       "function": "_resize_cpu_area_fast_kernel"

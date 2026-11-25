@@ -141,7 +141,7 @@ flagcv::GpuMat subview(const Image& backing, const cv::Rect& roi) {
 }
 
 void run_batch(flagcv::Handle& handle, const Stream& stream, Size in, ResizeOptions options,
-               int channels) {
+               int channels, bool direct_cpu = false) {
   constexpr int count = 3;
   const ResizePlan plan(in, flagcv::Depth::k8U, channels, options);
   const Size out = plan.destination_size();
@@ -162,7 +162,14 @@ void run_batch(flagcv::Handle& handle, const Stream& stream, Size in, ResizeOpti
                       plan, tables.view(), stream.value);
   auto got = dest.download(stream);
   for (int n = 0; n < count; ++n) {
-    compare(got(dst_roi), reference(source.host(src_roi), out, options), options.interpolation);
+    cv::Mat expected;
+    if (direct_cpu) {
+      cv::resize(source.host(src_roi), expected, {options.size.width, options.size.height},
+                 options.fx, options.fy, static_cast<int>(options.interpolation));
+    } else {
+      expected = reference(source.host(src_roi), out, options);
+    }
+    compare(got(dst_roi), expected, options.interpolation);
     dest.host(dst_roi).copyTo(got(dst_roi));
     src_roi.y += source_rows;
     dst_roi.y += destination_rows;
@@ -185,6 +192,8 @@ void check_independent_cpu(flagcv::Handle& handle, const Stream& stream) {
       {"two-tap-area-4k-c4-u8", {3840, 2160}, {{2560, 1440}, 0, 0, Interpolation::kArea}, CV_8UC4},
       {"two-tap-area-1080p-c4-f32", {1920, 1080}, {{1280, 720}, 0, 0, Interpolation::kArea}, CV_32FC4},
       {"area-different-phase-same-rounded-size", {1920, 1080}, {{}, .6665, .6665, Interpolation::kArea}, CV_8UC4},
+      {"three-to-two-area-partial-tile-c4", {771, 9}, {{514, 6}, 0, 0, Interpolation::kArea}, CV_8UC4},
+      {"three-to-two-area-c3-fallback", {771, 9}, {{514, 6}, 0, 0, Interpolation::kArea}, CV_8UC3},
       {"fractional-area", {37, 29}, {{17, 13}, 0, 0, Interpolation::kArea}, CV_8UC3},
       {"mixed-area-up-down", {31, 11}, {{13, 23}, 0, 0, Interpolation::kArea}, CV_8UC1},
       {"noninteger-fx-fy", {19, 17}, {{}, 0.664, 1.37, Interpolation::kLinear}, CV_8UC4},
@@ -311,6 +320,11 @@ int main(int argc, char** argv) {
 #endif
     const Stream native, default_stream(false);
     check_independent_cpu(handle, native);
+    if (argc == 2 && std::string_view(argv[1]) == "--area-polyphase") {
+      run_batch(handle, native, {771, 9}, {{514, 6}, 0, 0, Interpolation::kArea}, 4, true);
+      std::cout << "independent CPU PASS AREA C4 batch with separate pitches\n";
+      return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--independent-cpu") return 0;
     reject_cases(handle, native);
     for (auto mode : modes) {

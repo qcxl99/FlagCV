@@ -27,6 +27,7 @@ struct ResizePlan::Data {
   int xmax = 0;
   int kx = 0;
   int ky = 0;
+  bool area_polyphase = false;
   std::vector<std::uint32_t> words;
   std::vector<Table> tables;
 
