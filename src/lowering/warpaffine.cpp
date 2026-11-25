@@ -125,10 +125,15 @@ LoweredOp lower_warp_affine(const GpuMat& src, const GpuMat& dst,
       throw std::invalid_argument("warpAffine border values must be finite and representable");
     if (s.depth != Depth::k32F) {
       const double maximum = s.depth == Depth::k8U ? 255.0 : 65535.0;
-      value = std::clamp(value, 0.0, maximum);
       const double lower = std::floor(value);
       const double fraction = value - lower;
-      value = lower + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lower, 2.0) != 0));
+      const double rounded =
+          lower + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lower, 2.0) != 0));
+      // The fixed SSE3 CPU rounds to signed int32 before saturating to the
+      // pixel type. A conversion overflow produces INT_MIN, which saturates to zero.
+      value = rounded > std::numeric_limits<std::int32_t>::max()
+                  ? 0.0
+                  : std::clamp(rounded, 0.0, maximum);
     }
     op.add_fp32_param(border_names[i], static_cast<float>(value));
   }

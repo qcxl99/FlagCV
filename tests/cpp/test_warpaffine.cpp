@@ -130,6 +130,21 @@ void check_cubic_constant_fringe(flagcv::Handle& handle, const Stream& stream) {
   }
 }
 
+void check_integer_border_rounding(flagcv::Handle& handle, const Stream& stream) {
+  constexpr double int32_max = std::numeric_limits<std::int32_t>::max();
+  constexpr BorderMode constant{Border::kConstant, cv::BORDER_CONSTANT};
+  constexpr AffineMatrix outside{0, 0, -128, 0, 0, -128};
+  constexpr AffineMatrix partial{1, 0, -0.5, 0, 1, -0.5};
+  constexpr BorderValue overflow{int32_max + 0.5, int32_max + 1, 1e12, -1e12};
+  constexpr BorderValue ties{int32_max + 0.25, 2.5, 3.5, 65535.5};
+  for (int type : {CV_8UC4, CV_16UC4}) {
+    for (Mode mode : modes) {
+      run_case(handle, stream, type, {4, 4}, {37, 2}, outside, mode, constant, overflow, true);
+      run_case(handle, stream, type, {4, 4}, {37, 2}, partial, mode, constant, ties, true);
+    }
+  }
+}
+
 template<class Call>
 void rejects(Call call) {
   try {
@@ -192,7 +207,7 @@ void check_wide_indices(flagcv::Handle& handle) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
 #ifdef FLAGCV_TEST_HIP
     flagcv::Handle handle("hip");
@@ -201,6 +216,11 @@ int main() {
 #endif
     cv::setNumThreads(1);
     const Stream default_stream(false), native_stream;
+    check_integer_border_rounding(handle, native_stream);
+    if (argc == 2 && std::string(argv[1]) == "--integer-border") {
+      std::cout << "warpAffine integer border: 16 cases passed\n";
+      return 0;
+    }
     reject_cases(handle);
     check_wide_indices(handle);
     check_cubic_constant_fringe(handle, native_stream);
