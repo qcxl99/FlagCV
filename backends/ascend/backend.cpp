@@ -22,8 +22,9 @@
  * The packed layout follows libtriton_jit's Ascend backend: three 8-byte
  * system arguments first (ffts address, block-lock pointer, workspace
  * address), then the user arguments at their natural alignment, then the
- * launch grid as three int32 values. Triton's Ascend ABI does not append the
- * scratch pointers, so appends_scratch_args is 0.
+ * launch grid as three int32 values. This preview also expects no trailing
+ * scratch arguments. Verify the ABI on the target CANN/FlagTree build before
+ * enabling the backend.
  *
  * Includes no core internal header.
  */

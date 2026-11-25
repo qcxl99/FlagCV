@@ -171,8 +171,9 @@ module from bytes, get function, launch with an argument array), so a plugin
 is just an `Api` struct naming its own calls. Ascend does not have that shape
 — it registers the binary with the runtime and passes a packed argument
 buffer — so it implements the table itself and sets
-`appends_scratch_args = 0`, because Triton's Ascend ABI has no trailing
-scratch pointers.
+`appends_scratch_args = 0` in the preview code. This is a provisional ABI
+expectation and must be verified against the target CANN/FlagTree build before
+enabling Ascend.
 
 The plugin also reports the compile target (`cuda:90:32`, `hip:gfx942:64`,
 ...) and the Triton backend name, which is what lets the compiler process
