@@ -107,6 +107,17 @@ void run_case(flagcv::Handle& handle, const Stream& stream, int type, cv::Size s
   require(bytes_equal(checked, dst.host), "warpAffine wrote outside its destination ROI");
 }
 
+void check_cubic_constant_fringe(flagcv::Handle& handle, const Stream& stream) {
+  // With a large F32 constant, the CPU's weighted fringe differs from
+  // writing the border value directly by more than the tolerance.
+  const Mode cubic{Interpolation::kCubic, cv::INTER_CUBIC};
+  const BorderMode constant{Border::kConstant, cv::BORDER_CONSTANT};
+  for (const AffineMatrix& matrix : {AffineMatrix{0, 0, -2.2, 0, 0, 0},
+                                     AffineMatrix{0, 0, 0, 0, 0, -2.2}}) {
+    run_case(handle, stream, CV_32FC1, {4, 4}, {37, 1}, matrix, cubic, constant, {10000}, true);
+  }
+}
+
 template<class Call>
 void rejects(Call call) {
   try {
@@ -180,6 +191,7 @@ int main() {
     const Stream default_stream(false), native_stream;
     reject_cases(handle);
     check_wide_indices(handle);
+    check_cubic_constant_fringe(handle, native_stream);
     int cases = 0;
     int failures = 0;
     for (int depth : {CV_8U, CV_16U, CV_32F}) {

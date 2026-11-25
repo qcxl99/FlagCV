@@ -344,13 +344,10 @@ def _warp_cubic(src_ptr, dst_ptr, M00, M01, M02, M10, M11, M12, src_h, src_w, ds
     wx0, wx1, wx2, wx3 = _bicubic_weights_t(ax, FUSED)
     wy0, wy1, wy2, wy3 = _bicubic_weights_t(ay, FUSED)
 
-    # all_outliers: the whole 4-tap window is outside, i.e. floor(sx)-1+3 < 0 or >= width, which
-    # with ix0 = floor(sx)-1 is ix0+3 < 0 or ix0 >= width. The upper half is `ix0 + 4 >= width + 4`
-    # (same thing); the lower half must be `ix0 + 3 < 0`, NOT `ix0 + 4 < 0` -- the latter is one
-    # pixel too strict and leaves a column/row of pixels written that the CPU leaves untouched
-    # (warp_kernels.simd.hpp bicubicCoeffs: `(unsigned)(ix0+4) >= (unsigned)(width+4)` compared
-    # against the window origin, and the TRANSPARENT skip is `code == -1`).
-    all_out = (ix0 >= src_w) | (ix0 + 3 < 0) | (iy0 >= src_h) | (iy0 + 3 < 0)
+    # Match OpenCV bicubicCoeffs' unsigned bounds on origin + 4. The
+    # origin at -4 stays in its weighted path even when every tap is outside.
+    # Compare the upper bound directly so a source extent near INT_MAX stays valid.
+    all_out = (ix0 >= src_w) | (ix0 + 4 < 0) | (iy0 >= src_h) | (iy0 + 4 < 0)
 
     wx = (wx0, wx1, wx2, wx3)
     wy = (wy0, wy1, wy2, wy3)

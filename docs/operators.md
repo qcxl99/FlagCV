@@ -12,7 +12,6 @@
 | `bitwise_and` | 全部 `Depth`，含浮点存储位；可选 mask，允许原地 | 8U | 公开 API、Python、OpenCV CUDA 逐例基线 | Core 位运算维护者 |
 | `bitwise_not` | 全部 `Depth`，含浮点存储位；可选 mask，允许原地 | 8U | 公开 API、Python、OpenCV CUDA 逐例基线 | Core 位运算维护者 |
 | `flip` | 全部 `Depth`，逐位搬运；正、零、负方向，允许原地 | 8U/32F，三种方向 | 公开 API、Python、OpenCV CUDA 逐例基线 | Core 几何维护者 |
-
 | `warpAffine` | 8U/16U/32F，C1/C3/C4，独立 pitch 与 ROI；目标尺寸取自 dst；正向或逆向 2×3 矩阵；禁止重叠 | 独立 Python 性能验收待补 | H20 公开 API 正确性切片；性能验收待补 | Imgproc 几何维护者 |
 
 `warpAffine` 默认 LINEAR 和零常量边框。支持 NEAREST、LINEAR、CUBIC 和
