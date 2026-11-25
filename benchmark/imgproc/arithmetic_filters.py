@@ -156,7 +156,7 @@ def spatial_call(operation, depth, source, target, ksize, edge, two_pass, weight
         request.update(backend="nvidia", target="cuda:90:32", from_platform_registry=False)
         tile, warps, plan = provider.compile(request)
         params = {x["name"]: x["value"] for x in request["params"]}
-        grid = evaluate_grid(plan, values)
+        grid = evaluate_grid(plan, params)
         launch = loader(str(path), entry["function"])[tuple(grid)]
         arguments = {img["name"]+"_ptr": pointers[img["address"]] for img in request["images"]}
         arguments.update(params)
