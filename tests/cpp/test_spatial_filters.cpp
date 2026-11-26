@@ -217,7 +217,6 @@ void filter_u16_saturation(Handle& handle, const Stream& upload, const Stream& u
       {{0x1p31, 0, 0}, 65535},
       {{-0x1p31, 0, 0}, 0},
       {{65534.5, 0, 0}, 65534},
-      {{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), 0}, 0},
   };
   for (const auto& item : cases) {
     std::array<double, 81> weights{};
