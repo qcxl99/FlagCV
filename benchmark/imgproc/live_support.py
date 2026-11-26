@@ -20,12 +20,14 @@ VERIFY_ONLY = "FLAGCV_IMGP_VERIFY_ONLY" in os.environ
 
 
 def hip_runtime_path():
+    sonames = ("libamdhip64.so", "libgalaxyhip.so")
     paths = set()
     for line in Path("/proc/self/maps").read_text().splitlines():
         fields = line.split(maxsplit=5)
         if len(fields) == 6:
             path = Path(fields[5])
-            if path.is_absolute() and path.name.startswith("libamdhip64.so"):
+            if path.is_absolute() and any(
+                    path.name == soname or path.name.startswith(soname + ".") for soname in sonames):
                 paths.add(path.resolve(strict=True))
     if len(paths) != 1:
         raise RuntimeError("the plugin and Torch need a single loaded HIP runtime")

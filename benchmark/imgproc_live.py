@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+from functools import lru_cache
 import math
 import re
 import shlex
@@ -21,13 +22,35 @@ def output(command, **options):
                           stderr=subprocess.PIPE, **options).stdout
 
 
+@lru_cache(maxsize=1)
+def elf_interpreter():
+    headers = output(["readelf", "-lW", sys.executable], env=dict(os.environ, LC_ALL="C"))
+    match = re.search(r"\[Requesting program interpreter: ([^\]]+)\]", headers)
+    if match is None or not Path(match[1]).is_absolute():
+        raise ValueError("unable to identify the installed Python ELF loader")
+    return str(Path(match[1]).resolve(strict=True))
+
+
 def library_paths(binary, env):
     paths = {}
-    for line in output(["ldd", str(binary)], env=env).splitlines():
+    command = [elf_interpreter()]
+    if env.get("LD_LIBRARY_PATH"):
+        command.extend(["--library-path", env["LD_LIBRARY_PATH"]])
+    command.extend(["--list", str(binary)])
+    for line in output(command, env=env).splitlines():
         fields = line.split()
         if len(fields) >= 3 and fields[1] == "=>" and fields[2].startswith("/"):
             paths[fields[0]] = Path(fields[2]).resolve()
     return paths
+
+
+def resolved_hip_runtime(paths):
+    sonames = ("libamdhip64.so", "libgalaxyhip.so")
+    runtimes = {str(path) for name, path in paths.items()
+                if any(name == soname or name.startswith(soname + ".") for soname in sonames)}
+    if len(runtimes) > 1:
+        raise ValueError("dependency loader found multiple HIP runtimes")
+    return next(iter(runtimes), None)
 
 
 def verify_identity(prefix, binary, env):
@@ -39,8 +62,7 @@ def verify_identity(prefix, binary, env):
               for name, path in paths.items() if name.startswith("libopencv_")}
     return dict(runtime=str(runtime), runtime_sha256=hashlib.sha256(runtime.read_bytes()).hexdigest(),
                 executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), opencv=opencv,
-                hip_runtime=next((str(path) for name, path in paths.items()
-                                  if name.startswith("libamdhip64.so")), None))
+                hip_runtime=resolved_hip_runtime(paths))
 
 
 def verify_reference(cpp_libraries, python_libraries, hip):
@@ -289,8 +311,7 @@ def run_live(prefix, cases, profile, summary, *, backend=None, verify_only=False
     if not plugin.is_relative_to(prefix):
         raise ValueError("backend plugin did not come from the relocated prefix")
     if hip:
-        plugin_runtime = next((str(path) for name, path in library_paths(plugin, env).items()
-                               if name.startswith("libamdhip64.so")), None)
+        plugin_runtime = resolved_hip_runtime(library_paths(plugin, env))
         if not plugin_runtime or plugin_runtime != device.get("hip_runtime"):
             raise ValueError("HIP plugin and installed Python resolve different runtime libraries")
         env["FLAGCV_IMGP_HIP_RUNTIME"] = plugin_runtime

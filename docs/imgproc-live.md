@@ -31,6 +31,9 @@ group once and records every explicitly requested ID in
 For HIP, the C++ runner and Python must use the same OpenCV core and imgproc
 libraries and one resolved HIP runtime library. Select an environment in which
 the plugin, the runner and Torch use that runtime.
+The verifier recognizes AMD HIP and Hygon Galaxy HIP runtime libraries. It
+uses `readelf` to identify the ELF interpreter and asks that loader to resolve
+dependencies with the supplied library search path.
 
 HIP event samples use warm buffers without clearing L2. The default
 profile averages two round medians after 100 ms warmup and a 100 ms
