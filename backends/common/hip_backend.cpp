@@ -4,17 +4,25 @@
 
 #include "backends/common/driver_backend.hpp"
 
-/*
- * Hygon (DCU) plugin.
- *
- * The HIP module API has the CUDA driver shape, so the shared flow applies;
- * the compile target is Triton's "hip" backend with the GPU architecture
- * (gfx942 and so on), and the artifact is a .hsaco.
- *
- * Includes no core internal header.
- */
+// Internal HIP driver shared by the separate ROCm and DTK plugins.
+#include <string_view>
 
 namespace {
+
+constexpr bool supported_target(std::string_view vendor, std::string_view arch, int wave) {
+  if (vendor == "amd") return arch == "gfx1100" && wave == 32;
+  return vendor == "hygon" && (arch == "gfx936" || arch == "gfx938") && wave == 64;
+}
+
+static_assert(supported_target("amd", "gfx1100", 32) &&
+              supported_target("hygon", "gfx936", 64) &&
+              supported_target("hygon", "gfx938", 64));
+static_assert(!supported_target("amd", "gfx936", 64) &&
+              !supported_target("amd", "gfx938", 64) &&
+              !supported_target("hygon", "gfx1100", 32) &&
+              !supported_target("hygon", "gfx936", 32) &&
+              !supported_target("amd", "gfx942", 64) &&
+              !supported_target("hip", "gfx936", 64));
 
 struct HipApi {
   using Status = hipError_t;
@@ -23,7 +31,7 @@ struct HipApi {
   using Module = hipModule_t;
   using Function = hipFunction_t;
 
-  static const char* name() { return "hip"; }
+  static const char* name() { return FLAGCV_HIP_VENDOR; }
   static Status success() { return hipSuccess; }
 
   static Status init() { return hipInit(0); }
@@ -69,8 +77,9 @@ struct HipApi {
     // gcnArchName carries target features ("gfx936:sramecc+:xnack-"); Triton
     // takes the bare architecture, as its own HIP driver does.
     std::string arch = props.gcnArchName;
-    out = "hip:" + arch.substr(0, arch.find(':')) + ":" +
-          std::to_string(props.warpSize);
+    arch = arch.substr(0, arch.find(':'));
+    if (!supported_target(name(), arch, props.warpSize)) return hipErrorInvalidDevice;
+    out = "hip:" + arch + ":" + std::to_string(props.warpSize);
     return hipSuccess;
   }
 
@@ -82,7 +91,7 @@ struct HipApi {
     if (hipDeviceGetAttribute(&bus, hipDeviceAttributePciBusId, device) != hipSuccess)
       return hipErrorUnknown;
     out =
-        std::string("hip:") + props.gcnArchName + ":bus" + std::to_string(bus);
+        std::string(name()) + ":" + props.gcnArchName + ":bus" + std::to_string(bus);
     return hipSuccess;
   }
 

@@ -170,7 +170,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         )
     backend = triton.compiler.make_backend(target)
     require_qualified_compiler(request["backend"], target.backend, triton.__version__,
-                               target.arch, type(backend).__module__)
+                               target.arch, type(backend).__module__, target.warp_size)
     options = backend.parse_options({"num_warps": num_warps, "num_stages": num_stages})
     # Deliberately no fn.create_binder(): it probes the active driver, which
     # imports torch and initialises a device. ASTSource compilation does not
@@ -194,7 +194,10 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
             f"compiled kernel has no {facts['binary']!r} image; "
             f"available: {sorted(compiled.asm)}"
         )
-    artifact_dir = cache_dir() / "artifacts" / compiled.hash
+    artifact_dir = cache_dir() / "artifacts"
+    if target.backend == "hip":
+        artifact_dir /= request["backend"]
+    artifact_dir /= compiled.hash
     artifact = artifact_dir / f"{metadata.name}.{facts['extension']}"
     if not artifact.is_file():
         artifact_dir.mkdir(parents=True, exist_ok=True)

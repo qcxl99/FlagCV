@@ -3,10 +3,10 @@
 
 #include <flagcv/flagcv.hpp>
 
-#if defined(FLAGCV_CONSUMER_HIP) || defined(FLAGCV_CONSUMER_NVIDIA)
-#ifdef FLAGCV_CONSUMER_HIP
+#if defined(FLAGCV_CONSUMER_VENDOR) || defined(FLAGCV_CONSUMER_NVIDIA)
+#ifdef FLAGCV_CONSUMER_VENDOR
 #include "hip_test_api.hpp"
-constexpr auto backend = "hip";
+constexpr auto backend = FLAGCV_CONSUMER_VENDOR;
 #else
 #include <cuda_runtime_api.h>
 constexpr auto backend = "nvidia";

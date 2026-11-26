@@ -55,6 +55,15 @@ void exercise_registries() {
   const auto selected = flagcv::resolve_kernel("nvidia", "add");
   require(selected.from_platform_registry && selected.function == "override",
           "named platform entry must take precedence even if its source is missing");
+  write(root.path / "backends/amd/kernels/registry.json",
+        R"({"kernels":[{"name":"add","source":"add.py","function":"amd_add"}]})");
+  write(root.path / "backends/hygon/kernels/registry.json",
+        R"({"kernels":[{"name":"add","source":"add.py","function":"hygon_add"}]})");
+  const auto amd = flagcv::resolve_kernel("amd", "add");
+  const auto hygon = flagcv::resolve_kernel("hygon", "add");
+  require(amd.from_platform_registry && amd.function == "amd_add" &&
+          hygon.from_platform_registry && hygon.function == "hygon_add" && amd.source != hygon.source,
+          "vendor registries must be independent");
   write(platform, "broken json");
   bool failed = false;
   try {

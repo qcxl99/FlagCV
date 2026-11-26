@@ -25,12 +25,12 @@ Plus the toolchain of the backend you build. `libflagcv` itself links no vendor 
 |---|---|
 | `nvidia` | CUDA driver API (`CUDA::cuda_driver`) |
 | `iluvatar` | CUDA-compatible driver API (`CUDA::cuda_driver`) |
-| `hip` | HIP runtime from ROCm or DTK |
-| `hygon` | Legacy name for the shared HIP plugin |
+| `amd` | AMD ROCm, gfx1100 wave32 |
+| `hygon` | Hygon DTK, gfx936/gfx938 wave64 |
 | `mthreads` | MUSA runtime |
 | `thead` | PPU driver API (`CUstream`), T-Head PPU SDK |
 
-NVIDIA and the shared HIP path have on-device public API evidence. HIP
+NVIDIA and the pre-split HIP builds have on-device public API evidence. HIP
 qualification is tracked per device and toolchain. Iluvatar, MThreads and
 T-Head can be built with their SDKs and await native launch qualification.
 For Iluvatar, use `-DCUDAToolkit_ROOT=<corex>`.
@@ -42,7 +42,7 @@ Ascend C++ is unavailable in this build. Selecting `ascend` in
 `FLAGCV_BACKENDS` fails at configure time. Enablement requires verification
 with an application-owned AscendCL context, buffers and stream.
 
-The shared HIP backend uses the same module and stream API on AMD ROCm and
+The AMD and Hygon plugins share internal HIP module and stream code on AMD ROCm and
 Hygon DTK. See [HIP validation](docs/hip-validation.md) for the device matrix
 and [scratch ABI qualification](docs/architecture.md#scratch-abi-qualification)
 for the native launch boundary.

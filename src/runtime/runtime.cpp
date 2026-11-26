@@ -55,6 +55,8 @@ const char* depth_name(Depth depth) {
  * a common source of shutdown crashes, and the mapping is small.
  */
 const FlagcvBackendV2& load_plugin(const std::string& backend) {
+  if (backend == "hip")
+    throw Error("flagcv: the hip backend was removed; select amd (ROCm) or hygon (DTK).");
   static std::mutex mutex;
   static std::map<std::string, const FlagcvBackendV2*> plugins;
   std::lock_guard<std::mutex> lock(mutex);
@@ -195,12 +197,12 @@ Handle::Handle(const std::string& backend, int device) : state_(new State) {
     throw Error(std::string("flagcv: ") + plugin.last_error());
   }
   char buffer[256];
-  if (plugin.device_id(state_->context, buffer, sizeof(buffer)) != 0)
-    throw Error(plugin.last_error());
-  state_->device_id = buffer;
   if (plugin.target(state_->context, buffer, sizeof(buffer)) != 0)
     throw Error(plugin.last_error());
   state_->target = buffer;
+  if (plugin.device_id(state_->context, buffer, sizeof(buffer)) != 0)
+    throw Error(plugin.last_error());
+  state_->device_id = buffer;
 }
 
 Handle::~Handle() = default;

@@ -86,6 +86,14 @@ void exercise(const std::filesystem::path& directory) {
 
 int main(int argc, char** argv) {
   try {
+    try {
+      flagcv::Handle legacy("hip");
+      throw std::logic_error("the removed HIP backend was accepted");
+    } catch (const flagcv::Error& error) {
+      if (std::string(error.what()).find("select amd (ROCm) or hygon (DTK)") == std::string::npos)
+        throw;
+    }
+
     require(argc == 2, "expected fixture directory");
     exercise(argv[1]);
     return 0;

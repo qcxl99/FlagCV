@@ -27,8 +27,10 @@ class ScratchABI(unittest.TestCase):
     def test_verified_layout(self):
         require_qualified_compiler("nvidia", "cuda", "3.6.0")
         for arch in ("gfx936", "gfx938"):
-            require_qualified_compiler("hip", "hip", "3.6.0", arch,
-                                       "triton.backends.hcu.compiler_hcu")
+            require_qualified_compiler("hygon", "hip", "3.6.0", arch,
+                                       "triton.backends.hcu.compiler_hcu", 64)
+        require_qualified_compiler("amd", "hip", "3.6.0", "gfx1100",
+                                   "triton.backends.amd.compiler", 32)
         self.assertEqual(validated_scratch_args(ZERO, PTX, SIGNATURE), 2)
 
     def test_unqualified_compiler_or_platform(self):
@@ -37,6 +39,19 @@ class ScratchABI(unittest.TestCase):
                          ("iluvatar", "ix", "3.6.0"), ("thead", "PPU", "3.6.0")):
             with self.subTest(identity=identity), self.assertRaisesRegex(RuntimeError, "unqualified"):
                 require_qualified_compiler(*identity)
+
+    def test_vendor_target_wave_and_compiler_must_match(self):
+        amd = "triton.backends.amd.compiler"
+        hcu = "triton.backends.hcu.compiler_hcu"
+        for vendor, arch, module, wave in (
+            ("amd", "gfx936", hcu, 64), ("amd", "gfx938", hcu, 64),
+            ("hygon", "gfx1100", amd, 32), ("hygon", "gfx936", hcu, 32),
+            ("hygon", "gfx938", amd, 64), ("amd", "gfx1100", hcu, 32),
+            ("hip", "gfx936", hcu, 64), ("amd", "gfx942", amd, 64),
+        ):
+            with self.subTest(vendor=vendor, arch=arch, wave=wave):
+                with self.assertRaisesRegex(RuntimeError, "unqualified"):
+                    require_qualified_compiler(vendor, "hip", "3.6.0", arch, module, wave)
 
     def test_requires_both_zero_metadata_fields(self):
         for metadata in (SimpleNamespace(name="sample", global_scratch_size=0),

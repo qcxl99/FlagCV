@@ -97,7 +97,7 @@ zero. It also verifies the emitted PTX entry layout against the Runtime
 signature, including the two trailing 64-bit pointer parameters. The Runtime
 compares that count with the backend expectation before loading the binary.
 
-The shared HIP plugin accepts a bounded FlagTree 3.6.0 compiler/target set
+The AMD and Hygon plugins accept separate bounded Triton 3.6.0 compiler/target sets
 (gfx936, gfx938 and gfx1100). Both qualified compiler families emit two
 trailing pointer slots. FlagCV validates their LLVM entry signature and
 checks that both pointers have the `readnone` attribute. The profile scratch
@@ -167,7 +167,8 @@ broken the contract.
 |---|---|---|---|---|
 | `nvidia` | `cuda.h` | `.cubin` | 32 | |
 | `iluvatar` | CoreX `cuda.h` | `.cubin` | 64 | needs `CUDAToolkit_ROOT` pointed at CoreX |
-| `hip` / `hygon` | `hip/hip_runtime.h` | `.hsaco` | 32 or 64 | shared ROCm/DTK driver |
+| `amd` | `hip/hip_runtime.h` | `.hsaco` | 32 | AMD ROCm |
+| `hygon` | `hip/hip_runtime.h` | `.hsaco` | 64 | Hygon DTK |
 | `mthreads` | `musa.h` | `.mubin` | 32 | Triton backend name is `mtgpu` |
 | `thead` | `hggc.h` | `.hgbin` | 32 | Triton backend name is `PPU` |
 | `ascend` (unavailable) | `acl/acl.h`, `rt.h` | `.npubin` | 1 | preview source, excluded from C++ builds |
@@ -182,7 +183,7 @@ buffer — so it implements the table itself and sets
 expectation and must be verified against the target CANN/FlagTree build before
 enabling Ascend.
 
-The plugin also reports the compile target (`cuda:90:32`, `hip:gfx942:64`,
+The plugin also reports the compile target (`cuda:90:32`, `hip:gfx936:64`,
 ...) and the Triton backend name, which is what lets the compiler process
 build for a device it never touches. The platform facts the compiler needs —
 artifact format, Triton backend name, element-block and warp limits — are in

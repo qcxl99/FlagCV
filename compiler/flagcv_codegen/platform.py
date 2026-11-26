@@ -82,12 +82,19 @@ PLATFORM = {
 }
 
 
+HIP_TARGETS = {
+    "amd": ("hip:gfx1100:32",),
+    "hygon": ("hip:gfx936:64", "hip:gfx938:64"),
+}
+
+
 def platform(backend, target=None):
-    if backend in ("hip", "hygon"):
-        hip_targets = {"hip:gfx936:64": 64, "hip:gfx938:64": 64, "hip:gfx1100:32": 32}
-        if target not in hip_targets:
-            raise ValueError(f"unsupported HIP target {target!r}")
-        return dict(PLATFORM["hygon"], warp=hip_targets[target])
+    if backend == "hip":
+        raise ValueError("the hip backend was removed; select amd or hygon")
+    if backend in HIP_TARGETS:
+        if target not in HIP_TARGETS[backend]:
+            raise ValueError(f"unsupported target {target!r} for {backend}")
+        return dict(PLATFORM["hygon"], warp=int(target.rsplit(":", 1)[1]))
     entry = PLATFORM.get(backend)
     if entry is None:
         raise ValueError(f"no platform facts for backend {backend!r}")

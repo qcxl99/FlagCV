@@ -52,6 +52,8 @@ _PROVIDERS = {}
 
 
 def load_provider(backend):
+    if backend == "hip":
+        raise ValueError("the hip backend was removed; select amd or hygon")
     provider = _PROVIDERS.get(backend)
     if provider is not None:
         return provider

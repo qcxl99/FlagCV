@@ -6,18 +6,20 @@
 import re
 
 
-def require_qualified_compiler(backend, target, version, arch=None, compiler_module=None):
-    # Triton v3.6.0 NVIDIA's launcher appends global and profile scratch
-    # pointers, in that order. Qualify vendor launchers separately.
-    hip_compilers = {"gfx936": "triton.backends.hcu.compiler_hcu",
-                     "gfx938": "triton.backends.hcu.compiler_hcu",
-                     "gfx1100": "triton.backends.amd.compiler"}
-    if (backend in ("hip", "hygon") and target == "hip" and version == "3.6.0"
-            and compiler_module is not None and hip_compilers.get(arch) == compiler_module):
+from flagcv_codegen.platform import HIP_TARGETS
+
+
+def require_qualified_compiler(backend, target, version, arch=None, compiler_module=None,
+                               warp=None):
+    # Qualify each vendor launcher and its actual target independently.
+    hip_compilers = {"amd": "triton.backends.amd.compiler",
+                     "hygon": "triton.backends.hcu.compiler_hcu"}
+    if (backend in HIP_TARGETS and f"{target}:{arch}:{warp}" in HIP_TARGETS[backend]
+            and version == "3.6.0" and hip_compilers[backend] == compiler_module):
         return
     if (backend, target, version) != ("nvidia", "cuda", "3.6.0"):
         raise RuntimeError(
-            f"scratch ABI is unqualified for {backend}/{target}:{arch} with {compiler_module} (Triton {version})"
+            f"scratch ABI is unqualified for {backend}/{target}:{arch}:{warp} with {compiler_module} (Triton {version})"
         )
 
 

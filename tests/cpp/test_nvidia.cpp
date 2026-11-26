@@ -18,7 +18,7 @@
 
 namespace {
 #ifdef FLAGCV_TEST_HIP
-constexpr auto test_backend = "hip";
+constexpr auto test_backend = FLAGCV_TEST_VENDOR;
 #else
 constexpr auto test_backend = "nvidia";
 #endif
@@ -356,7 +356,7 @@ void platform_failure() {
   try {
     flagcv::add(handle, src.view(), src.view(), dst.view(), stream.value);
   } catch (const flagcv::Error& error) {
-    failed = std::string(error.what()).find("flagcv_missing_nvidia_entry") != std::string::npos;
+    failed = std::string(error.what()).find("flagcv_missing_platform_entry") != std::string::npos;
   }
   require(failed, "registered platform kernel failure must surface to the caller");
   require(bytes_equal(dst.download(stream), dst.host), "failed dispatch wrote output");
