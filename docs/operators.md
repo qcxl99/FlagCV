@@ -21,8 +21,8 @@ Python 评测当前为连续单通道输入。C++ 使用预分配同形状、同
 | --- | --- |
 | Hygon BW1000 | 双卡公开 API 与原生 Stream、内部 Python、迁移安装、Core 逐例性能与分派。 |
 | NVIDIA H20 | FlagTree SM90 离线编译与 scratch ABI。实卡和新性能采集待复验。 |
-| Hygon BW1101 | 既有公开 API、Python、Stream 与安装证据，当前提交待复验。 |
-| AMD W7900D | 既有公开 API、Python 与安装证据，当前提交待复验。 |
+| Hygon BW1101 | `fd6153c` 双卡公开 API、便利重载、原生 Stream、设备恢复、Python 与迁移安装通过。Core 延迟为共享卡观测。 |
+| AMD W7900D | `fd6153c` 双卡公开 API、便利重载、原生 Stream、设备恢复、Python 与迁移安装通过。Core 保留实测延迟。 |
 
 平台工具链与历史支持见 [NVIDIA 验收](nvidia-validation.md) 和
 [HIP 验收](hip-validation.md)。
