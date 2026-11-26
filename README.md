@@ -1,10 +1,20 @@
 # FlagCV
 
+> Recovery note (2026-11-26): delivery-status documentation in this checkout was
+> reconstructed from the validated cad93ba source, archived platform records and
+> supervisor transcripts. It is not a byte-identical recovery of commit 009bcd8.
+> Runtime, compiler, backend, kernel and test sources remain unchanged.
+
 FlagCV provides immediate-mode GPU image processing through OpenCV-shaped C++
-interfaces and a standalone runtime. The NVIDIA delivery covers add, subtract,
+interfaces and a standalone runtime. The Core delivery includes add, subtract,
 multiply, bitwise AND, bitwise NOT, and flip. The shared image-processing
 interfaces include resize, warpAffine, cvtColor, warpPerspective, remap,
-copyMakeBorder, GaussianBlur, filter2D and threshold. The public library uses caller-owned
+copyMakeBorder, GaussianBlur, filter2D and threshold. Scoped public C++ and
+installed Python JIT records for these nine operators cover H20, BW1000,
+BW1101 and W7900D. Per-device qualification and remaining workload gaps are
+listed in [the operator inventory](docs/operators.md) and platform validation
+guides. These records do not imply a complete performance matrix on every card.
+The public library uses caller-owned
 image memory and native streams. Triton compilation runs in a separate Python
 process.
 
