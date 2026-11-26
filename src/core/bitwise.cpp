@@ -27,4 +27,24 @@ void bitwise_not(Handle& handle, const GpuMat& src, const GpuMat& dst,
   launch_pointwise(handle, src, src, dst, &mask, PointwiseMode::kNot, stream);
 }
 
+void bitwise_and(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+                 Stream stream) {
+  bitwise_and(detail::currentHandle(), src1, src2, dst, stream);
+}
+
+void bitwise_and(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+                 const GpuMat& mask, Stream stream) {
+  bitwise_and(detail::currentHandle(), src1, src2, dst, mask, stream);
+}
+
+void bitwise_not(const GpuMat& src, const GpuMat& dst,
+                 Stream stream) {
+  bitwise_not(detail::currentHandle(), src, dst, stream);
+}
+
+void bitwise_not(const GpuMat& src, const GpuMat& dst,
+                 const GpuMat& mask, Stream stream) {
+  bitwise_not(detail::currentHandle(), src, dst, mask, stream);
+}
+
 }  // namespace flagcv

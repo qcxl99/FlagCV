@@ -12,4 +12,9 @@ void flip(Handle& handle, const GpuMat& src, const GpuMat& dst, int flip_code,
   launch(handle, lower_flip(src, dst, flip_code), stream);
 }
 
+void flip(const GpuMat& src, const GpuMat& dst, int flip_code,
+          Stream stream) {
+  flip(detail::currentHandle(), src, dst, flip_code, stream);
+}
+
 }  // namespace flagcv

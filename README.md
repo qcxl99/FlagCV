@@ -107,10 +107,10 @@ int main() {
   cudaMalloc(&dst, sizeof(host));
   cudaMemcpy(src, host, sizeof(host), cudaMemcpyHostToDevice);
 
-  flagcv::Handle handle("nvidia", 0);  // backend plugin + kernel cache
+  flagcv::setDevice("nvidia", 0);
   flagcv::GpuMat in(src, width, height, flagcv::Depth::k8U, 1);
   flagcv::GpuMat out(dst, width, height, flagcv::Depth::k8U, 1);
-  flagcv::flip(handle, in, out, 1);  // 1: mirror columns, 0: rows, -1: both
+  flagcv::flip(in, out, 1);  // 1: mirror columns, 0: rows, -1: both
 
   // flip is enqueued on the default stream; this copy waits for it.
   cudaMemcpy(host, dst, sizeof(host), cudaMemcpyDeviceToHost);
@@ -130,6 +130,8 @@ cmake --build build
 
 The first call for a kernel variant starts the compiler if needed and loads
 the resulting module. Cached calls enqueue work on the selected stream.
+For explicit device ownership, construct a `flagcv::Handle` and pass it as the
+first argument.
 See [the architecture](docs/architecture.md) for cache keys and ownership.
 
 ### Correctness and performance

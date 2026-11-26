@@ -18,6 +18,7 @@ void trace(const char* action, int device, const std::string& payload = "") {
 }
 
 int create(int device, void** context) {
+  if (device < 0 || device > 1) return 1;
   *context = new Context{device};
   trace("create", device);
   return 0;

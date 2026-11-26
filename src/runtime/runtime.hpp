@@ -12,6 +12,10 @@
 
 namespace flagcv {
 
+namespace detail {
+Handle& currentHandle();
+}  // namespace detail
+
 /*
  * The single execution path every operator entry point funnels into.
  *

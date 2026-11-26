@@ -50,6 +50,11 @@ int main() {
     check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
     if (values != std::array<unsigned char, 8>{254, 253, 252, 251, 250, 249, 248, 247})
       throw std::runtime_error("installed bitwise_not returned incorrect output");
+    flagcv::setDevice(backend);
+    flagcv::flip(src_view, dst_view, -1);
+    check(cudaMemcpy(values.data(), dst.get(), values.size(), cudaMemcpyDeviceToHost));
+    if (values != std::array<unsigned char, 8>{8, 7, 6, 5, 4, 3, 2, 1})
+      throw std::runtime_error("installed flip with setDevice returned incorrect output");
     return 0;
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
@@ -59,6 +64,11 @@ int main() {
 #else
 int main() {
   const flagcv::GpuMat view(nullptr, 4, 2, flagcv::Depth::k16U, 3);
-  return view.row_pitch() == 24 && view.row_stride() == 12 ? 0 : 1;
+  try {
+    flagcv::flip(view, view, 0);
+  } catch (const flagcv::Error&) {
+    return view.row_pitch() == 24 && view.row_stride() == 12 ? 0 : 1;
+  }
+  return 1;
 }
 #endif

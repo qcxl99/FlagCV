@@ -41,4 +41,34 @@ void multiply(Handle& handle, const GpuMat& src1, const GpuMat& src2,
                    stream, scale);
 }
 
+void add(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+         Stream stream) {
+  add(detail::currentHandle(), src1, src2, dst, stream);
+}
+
+void add(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+         const GpuMat& mask, Stream stream) {
+  add(detail::currentHandle(), src1, src2, dst, mask, stream);
+}
+
+void subtract(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              Stream stream) {
+  subtract(detail::currentHandle(), src1, src2, dst, stream);
+}
+
+void subtract(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              const GpuMat& mask, Stream stream) {
+  subtract(detail::currentHandle(), src1, src2, dst, mask, stream);
+}
+
+void multiply(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              Stream stream) {
+  multiply(detail::currentHandle(), src1, src2, dst, stream);
+}
+
+void multiply(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              double scale, Stream stream) {
+  multiply(detail::currentHandle(), src1, src2, dst, scale, stream);
+}
+
 }  // namespace flagcv

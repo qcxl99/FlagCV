@@ -202,12 +202,13 @@ void CUDART_CB hold_stream(void* context) {
   while (!release.load()) std::this_thread::yield();
 }
 
-void stream_is_asynchronous(flagcv::Handle& handle) {
+template <typename Run>
+void stream_is_asynchronous(Run run) {
   Image a(4, 8, CV_8U), dst(4, 8, CV_8U);
   Stream stream;
   a.host.setTo(31);
   a.upload(stream.value);
-  flagcv::bitwise_not(handle, a.view(), dst.view(), stream.value);
+  run(a.view(), dst.view(), stream.value);
   stream.wait();
   std::atomic<bool> release{false};
   cuda_check(cudaLaunchHostFunc(stream.value, hold_stream, &release));
@@ -220,7 +221,7 @@ void stream_is_asynchronous(flagcv::Handle& handle) {
     release.store(true);
   });
   try {
-    flagcv::bitwise_not(handle, a.view(), dst.view(), stream.value);
+    run(a.view(), dst.view(), stream.value);
     require(!release.load(), "cached call waited for caller's stream");
     require(cudaStreamQuery(stream.value) == cudaErrorNotReady,
             "custom stream should still be blocked");
@@ -340,7 +341,9 @@ void cases(flagcv::Handle& handle) {
   check_case(handle, Op::flip, CV_8U, 3, 65539, 1, Mask::none, Alias::none, true, -1);
   validation(handle);
   shared_storage(handle);
-  stream_is_asynchronous(handle);
+  stream_is_asynchronous([&](auto src, auto dst, auto stream) {
+    flagcv::bitwise_not(handle, src, dst, stream);
+  });
 }
 
 void platform_failure() {
@@ -388,6 +391,49 @@ void independent_handles(int device) {
   exercise(survivor, 77);
 }
 
+void convenience_cases(flagcv::Handle& handle, int device) {
+  flagcv::setDevice(test_backend, device);
+  Image a(3, 5, CV_8U), b(3, 5, CV_8U), dst(3, 5, CV_8U),
+        expected(3, 5, CV_8U), mask(3, 5, CV_8U);
+  cv::RNG rng(0x42);
+  rng.fill(a.host, cv::RNG::UNIFORM, 0, 20);
+  rng.fill(b.host, cv::RNG::UNIFORM, 0, 20);
+  mask.host.setTo(255);
+  mask.host.ptr()[0] = 0;
+  Stream stream;
+  a.upload(stream.value);
+  b.upload(stream.value);
+  mask.upload(stream.value);
+  const auto s = stream.value;
+  const auto av = a.view(), bv = b.view(), dv = dst.view(), mv = mask.view();
+  auto verify = [&](Op op, auto run, const flagcv::GpuMat& mask_view = {}, int code = 0) {
+    dst.host.setTo(31);
+    expected.host.setTo(31);
+    dst.upload(s);
+    expected.upload(s);
+    call(op, handle, av, bv, expected.view(), s, code, mask_view);
+    run();
+    require(bytes_equal(dst.download(stream), expected.download(stream)), name(op));
+  };
+  verify(Op::add, [&] { flagcv::add(av, bv, dv, mv, s); }, mv);
+  verify(Op::subtract, [&] { flagcv::subtract(av, bv, dv, mv, s); }, mv);
+  verify(Op::multiply, [&] { flagcv::multiply(av, bv, dv, s); });
+  verify(Op::bitwise_and, [&] { flagcv::bitwise_and(av, bv, dv, mv, s); }, mv);
+  verify(Op::bitwise_not, [&] { flagcv::bitwise_not(av, dv, mv, s); }, mv);
+  verify(Op::flip, [&] { flagcv::flip(av, dv, -1, s); }, {}, -1);
+
+  Image f(3, 5, CV_32F), output(3, 5, CV_32F), explicit_output(3, 5, CV_32F);
+  rng.fill(f.host, cv::RNG::UNIFORM, -3.f, 4.f);
+  f.upload(s);
+  flagcv::multiply(handle, f.view(), f.view(), explicit_output.view(), 0.25, s);
+  flagcv::multiply(f.view(), f.view(), output.view(), 0.25, s);
+  require(bytes_equal(output.download(stream), explicit_output.download(stream)),
+          "scaled multiply convenience overload");
+  stream_is_asynchronous([](auto src, auto out, auto native_stream) {
+    flagcv::bitwise_not(src, out, native_stream);
+  });
+}
+
 void across_devices(int device_count) {
   std::vector<std::unique_ptr<flagcv::Handle>> handles;
   for (int device = 0; device < device_count; ++device)
@@ -408,6 +454,21 @@ void across_devices(int device_count) {
     cuda_check(cudaSetDevice(device));
     require(dst.download(stream).ptr()[0] == static_cast<unsigned char>(~(19 + device)),
             "handle used the wrong device");
+    cuda_check(cudaSetDevice(other));
+    flagcv::setDevice(test_backend, device);
+    cuda_check(cudaGetDevice(&current));
+    require(current == other, "setDevice changed the caller's current device");
+    src.host.setTo(29 + device);
+    cuda_check(cudaSetDevice(device));
+    src.upload(stream.value);
+    stream.wait();
+    cuda_check(cudaSetDevice(other));
+    flagcv::bitwise_not(src.view(), dst.view(), stream.value);
+    cuda_check(cudaGetDevice(&current));
+    require(current == other, "convenience call changed the caller's current device");
+    cuda_check(cudaSetDevice(device));
+    require(dst.download(stream).ptr()[0] == static_cast<unsigned char>(~(29 + device)),
+            "convenience call used the wrong device");
   }
 }
 }  // namespace
@@ -423,14 +484,15 @@ int main(int argc, char** argv) {
     cuda_check(cudaGetDeviceCount(&count));
     const int requested = argc == 2 ? std::stoi(argv[1]) : 1;
     require(requested >= 1 && requested <= count, "requested GPUs unavailable");
+    across_devices(requested);
     for (int device = 0; device < requested; ++device) {
       cuda_check(cudaSetDevice(device));
       flagcv::Handle handle(test_backend, device);
       cases(handle);
+      convenience_cases(handle, device);
       independent_handles(device);
       std::cout << test_backend << " device " << device << " passed public API matrix\n";
     }
-    across_devices(requested);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

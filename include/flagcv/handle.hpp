@@ -42,6 +42,9 @@ class Handle {
   std::unique_ptr<State> state_;
 };
 
+/* Selects the device used by the convenience overloads on this thread. */
+void setDevice(const std::string& backend, int device = 0);
+
 }  // namespace flagcv
 
 #endif  // FLAGCV_HANDLE_HPP_

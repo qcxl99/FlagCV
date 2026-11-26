@@ -67,6 +67,18 @@ bounded reaping. A later request can start a fresh compiler after reaping.
 Closing a Handle releases its loaded modules. At process shutdown the shared
 compiler gets a short EOF grace period before termination.
 
+### Selecting a device
+
+`flagcv::setDevice(backend, ordinal)` selects the Handle for convenience
+overloads on the calling thread. Each thread keeps one Handle and its loaded
+modules per backend and ordinal until thread exit. A failed selection
+preserves the thread's previous selection. Convenience calls require a
+successful selection first. Calls with an explicit Handle are independent.
+
+Device selection preserves the calling thread's SDK device and context.
+Buffers and native streams must belong to a context compatible with the
+selected Handle. NVIDIA uses the device's primary context. Keep buffers and
+streams alive and complete queued work before the owning thread exits.
 
 **Loaded modules.** Each Handle owns a cache in the context of its bound
 device. It matches the kernel name and operand/parameter signature, including

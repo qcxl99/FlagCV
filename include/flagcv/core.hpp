@@ -72,6 +72,32 @@ void bitwise_not(Handle& handle, const GpuMat& src, const GpuMat& dst,
 void flip(Handle& handle, const GpuMat& src, const GpuMat& dst, int flip_code,
           Stream stream = nullptr);
 
+/*
+ * Convenience overloads use the device selected by setDevice() on this
+ * thread. The argument and stream contracts match the explicit overloads.
+ */
+void add(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+         Stream stream = nullptr);
+void add(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+         const GpuMat& mask, Stream stream = nullptr);
+void subtract(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              Stream stream = nullptr);
+void subtract(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              const GpuMat& mask, Stream stream = nullptr);
+void multiply(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              Stream stream = nullptr);
+void multiply(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+              double scale, Stream stream = nullptr);
+void bitwise_and(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+                 Stream stream = nullptr);
+void bitwise_and(const GpuMat& src1, const GpuMat& src2, const GpuMat& dst,
+                 const GpuMat& mask, Stream stream = nullptr);
+void bitwise_not(const GpuMat& src, const GpuMat& dst, Stream stream = nullptr);
+void bitwise_not(const GpuMat& src, const GpuMat& dst, const GpuMat& mask,
+                 Stream stream = nullptr);
+void flip(const GpuMat& src, const GpuMat& dst, int flip_code,
+          Stream stream = nullptr);
+
 }  // namespace flagcv
 
 #endif  // FLAGCV_CORE_HPP_

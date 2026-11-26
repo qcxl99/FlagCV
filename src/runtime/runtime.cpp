@@ -17,6 +17,7 @@
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 #include "backends/backend.hpp"
 #include "src/runtime/compiler_client.hpp"
@@ -159,6 +160,15 @@ std::int64_t signature_value(const LoweredOp::Param& param) {
                             : (fits_i32(param.value) << 1) | divisible16(param);
 }
 
+using Device = std::pair<std::string, int>;
+
+struct ThreadDevices {
+  std::map<Device, Handle> handles;
+  Handle* current = nullptr;
+};
+
+thread_local ThreadDevices thread_devices;
+
 }  // namespace
 
 struct Handle::State {
@@ -212,6 +222,18 @@ Handle& Handle::operator=(Handle&&) noexcept = default;
 const std::string& Handle::backend() const {
   if (!state_) throw Error("flagcv: handle was moved from");
   return state_->backend;
+}
+
+void setDevice(const std::string& backend, int device) {
+  auto handle = thread_devices.handles.try_emplace(Device{backend, device},
+                                                  backend, device);
+  thread_devices.current = &handle.first->second;
+}
+
+Handle& detail::currentHandle() {
+  if (thread_devices.current == nullptr)
+    throw Error("flagcv: call setDevice() before using a device on this thread");
+  return *thread_devices.current;
 }
 
 ResolvedKernel resolve_kernel(const std::string& backend,

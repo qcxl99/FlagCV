@@ -8,7 +8,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <vector>
 
@@ -82,6 +84,70 @@ void exercise(const std::filesystem::path& directory) {
                        "unload 1 platform_add", "unload 1 " + not_symbol, "destroy 1"},
               "unexpected load/launch/unload/context sequence");
 }
+
+void convenience(const std::filesystem::path& directory) {
+  const auto backend = directory / "backend.trace";
+  const auto compiler = directory / "compiler.trace";
+  std::ofstream{backend};
+  std::ofstream{compiler};
+  alignas(16) std::array<unsigned char, 128> src{}, dst{};
+  const flagcv::GpuMat a(src.data(), 16, 2, flagcv::Depth::k8U, 1, 64);
+  const flagcv::GpuMat out(dst.data(), 16, 2, flagcv::Depth::k8U, 1, 64);
+  auto add = [&] { flagcv::add(a, a, out); };
+  auto require_unselected = [&] {
+    try {
+      add();
+    } catch (const flagcv::Error& error) {
+      require(std::string(error.what()).find("setDevice()") != std::string::npos,
+              "missing setDevice diagnostic");
+      return;
+    }
+    throw std::runtime_error("used a default handle without selecting a device");
+  };
+  require_unselected();
+  std::async(std::launch::async, [&] {
+    flagcv::setDevice("testfixture");
+    add();
+    flagcv::setDevice("testfixture", 0);
+    add();
+    flagcv::setDevice("testfixture", 1);
+    add();
+    try {
+      flagcv::setDevice("testfixture", -1);
+      throw std::runtime_error("invalid device accepted");
+    } catch (const flagcv::Error&) {
+      add();
+    }
+    flagcv::setDevice("testfixture");
+    std::async(std::launch::async, [&] {
+      require_unselected();
+      flagcv::Handle explicit_handle("testfixture", 1);
+      flagcv::add(explicit_handle, a, a, out);
+      require_unselected();
+      flagcv::setDevice("testfixture");
+      add();
+      flagcv::add(explicit_handle, a, a, out);
+      add();
+    }).get();
+    add();
+  }).get();
+  require_unselected();
+  check_trace(lines(compiler), std::vector<std::string>(4, "add platform platform_add"),
+              "selected devices did not reuse their compiler cache");
+  const auto events = lines(backend);
+  std::vector<std::string> launches;
+  std::copy_if(events.begin(), events.end(), std::back_inserter(launches),
+               [](const std::string& line) { return line.rfind("launch ", 0) == 0; });
+  const std::string zero = "launch 0 platform_add 1 default";
+  const std::string one = "launch 1 platform_add 1 default";
+  check_trace(launches, {zero, zero, one, one, one, zero, one, zero, zero},
+              "selected devices, threads or explicit handles interfered");
+  require(std::count(events.begin(), events.end(), "create 0") == 2 &&
+          std::count(events.begin(), events.end(), "create 1") == 2 &&
+          std::count(events.begin(), events.end(), "destroy 0") == 2 &&
+          std::count(events.begin(), events.end(), "destroy 1") == 2,
+          "device selection did not create and release exactly one handle per thread and key");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -96,6 +162,7 @@ int main(int argc, char** argv) {
 
     require(argc == 2, "expected fixture directory");
     exercise(argv[1]);
+    convenience(argv[1]);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
