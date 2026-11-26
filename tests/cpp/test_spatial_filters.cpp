@@ -200,6 +200,39 @@ void filter_half_weight_reference(Handle& handle, const Stream& upload, const St
   std::cout << "filter2D 8 exact half-weight fixtures passed\n";
 }
 
+void filter_u16_saturation(Handle& handle, const Stream& upload, const Stream& use) {
+  Image src(19, 37, CV_16UC1, 3, 1, 7);
+  Image dst(19, 37, CV_16UC1, 4, 2, 5);
+  src.host.setTo(cv::Scalar::all(91));
+  src.pixels().setTo(cv::Scalar::all(1));
+  dst.host.setTo(cv::Scalar::all(17));
+  struct Case {
+    std::array<double, 3> taps;
+    int value;
+  };
+  constexpr Case cases[] = {
+      // The exact correlation is positive, above U16, and just below the
+      // signed 32-bit rounding cliff. Every tap samples the value one.
+      {{0x1p31, -.5, -0x1p-55}, 65535},
+      {{0x1p31, 0, 0}, 65535},
+      {{-0x1p31, 0, 0}, 0},
+      {{65534.5, 0, 0}, 65534},
+      {{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), 0}, 0},
+  };
+  for (const auto& item : cases) {
+    std::array<double, 81> weights{};
+    std::copy(item.taps.begin(), item.taps.end(), weights.begin() + 40);
+    const Filter2DPlan plan({9, 9}, weights.data(), Depth::k16U,
+                            {{}, {}, 0, Border::kReflect});
+    const cv::Mat expected(19, 37, CV_16UC1, cv::Scalar::all(item.value));
+    execute(handle, upload, use, src, dst, plan.table(), expected,
+            [&](auto& h, const auto& s, const auto& d, auto workspace, auto stream) {
+              flagcv::filter2D(h, s, d, plan, workspace, stream);
+            });
+  }
+  std::cout << "filter2D U16 saturation and rounding controls passed\n";
+}
+
 void filter_three_tap_reference(Handle& handle, const Stream& upload, const Stream& use) {
   std::array<double, 81> weights{};
   weights[4 * 9 + 4] = 0.5;
@@ -466,6 +499,10 @@ int main(int argc, char** argv) {
       filter_half_weight_reference(handle, upload, custom);
       return 0;
     }
+    if (argc == 2 && std::string_view(argv[1]) == "--filter2d-u16-saturation") {
+      filter_u16_saturation(handle, upload, custom);
+      return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--filter2d-three-tap-reference") {
       filter_three_tap_reference(handle, upload, custom);
       return 0;
@@ -559,6 +596,7 @@ int main(int argc, char** argv) {
     row_pair_cases(handle, upload, custom);
     std::cout << "filter2D " << passed + 7 << " reference cases passed\n";
     filter_half_weight_reference(handle, upload, custom);
+    filter_u16_saturation(handle, upload, custom);
     filter_three_tap_reference(handle, upload, custom);
     return 0;
   } catch (const std::exception& error) {

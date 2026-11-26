@@ -52,6 +52,11 @@ def _rounded_i32(value):
 
 
 @triton.jit
+def _limit_finite_u16(value):
+    return tl.where((value > 65535.0) & (value < float("inf")), 65535.0, value)
+
+
+@triton.jit
 def filter2d_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
                     kernel_width, kernel_height, anchor_x, anchor_y,
                     CHANNELS: tl.constexpr, BORDER: tl.constexpr, FP64: tl.constexpr,
@@ -73,6 +78,8 @@ def filter2d_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_
                                     channel, width, height, src_stride, mask, CHANNELS, BORDER)
                 accum += value.to(work) * weight
     if DEST_INTEGER:
+        if DEST_MAX == 65535:
+            accum = _limit_finite_u16(accum)
         rounded = _rounded_i32(accum)
         output = tl.minimum(tl.maximum(rounded, DEST_MIN), DEST_MAX)
         tl.store(dst_ptr + y * dst_stride + x * CHANNELS + channel, output, mask)
