@@ -175,8 +175,9 @@ def plan_threshold_clear(request, facts):
 def plan_threshold_select(request, facts):
     params = {param["name"]: param.get("value") for param in request["params"]}
     gfx1100 = request["backend"] == "hip" and request["target"] == "hip:gfx1100:32"
+    sm90 = request["backend"] == "nvidia" and request["target"] == "cuda:90:32"
     return {
-        "OTSU_TILE": 32 if gfx1100 and params["BINS"] == 65536 and not params["TRIANGLE"] else 0,
+        "OTSU_TILE": 32 if (gfx1100 or sm90) and params["BINS"] == 65536 and not params["TRIANGLE"] else 0,
         "TRIANGLE_VECTOR": gfx1100 and bool(params["TRIANGLE"]),
     }, 1, [1, 1, 1]
 
