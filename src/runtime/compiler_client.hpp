@@ -5,6 +5,7 @@
 
 #include <sys/types.h>
 
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -23,7 +24,8 @@ namespace flagcv {
  * stderr is inherited so compiler diagnostics reach the user.
  *
  * The interpreter is FLAGCV_PYTHON, defaulting to python3 on PATH. If the
- * child dies, the failing request reports it and the next one restarts it.
+ * child dies or times out, the failing request reports it and the next
+ * request can restart it after reaping the old process.
  */
 class CompilerClient {
  public:
@@ -41,9 +43,11 @@ class CompilerClient {
  private:
   CompilerClient() = default;
   void start();
-  void stop();
-  void send_line(const std::string& line);
-  std::string receive_line();
+  using Deadline = std::chrono::steady_clock::time_point;
+  void stop(bool abandon_request = false) noexcept;
+  bool reap_until(Deadline deadline) noexcept;
+  void send_line(const std::string& line, Deadline deadline);
+  std::string receive_line(Deadline deadline);
 
   std::mutex mutex_;
   pid_t pid_ = -1;

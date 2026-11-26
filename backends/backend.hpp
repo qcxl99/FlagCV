@@ -41,7 +41,8 @@ typedef struct FlagcvBackendV2 {
   /*
    * 1 when compiled kernels take Triton's two trailing scratch pointers
    * after the declared arguments, 0 when the platform's ABI does not (the
-   * Ascend path does not). The core sizes the argument array from this.
+   * Ascend path does not). This is the plugin's expectation. The compiler's
+   * validated argument count must agree before a module can be loaded.
    */
   int appends_scratch_args;
 

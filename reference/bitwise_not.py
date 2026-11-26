@@ -1,8 +1,7 @@
-"""Torch reference for unmasked OpenCV uint8 complement."""
+"""OpenCV CPU unmasked bitwise complement."""
+
+from ._opencv import evaluate
 
 
 def reference(src, dst):
-    import torch
-
-    dst.copy_(torch.bitwise_not(src))
-    return dst
+    return evaluate("bitwise_not", (src,), dst)

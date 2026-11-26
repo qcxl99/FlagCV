@@ -19,8 +19,12 @@ from pathlib import Path
 
 import triton
 from triton.backends.compiler import GPUTarget
+from triton.runtime.cache import triton_key
 
 from flagcv_codegen import platform as platforms
+from flagcv_codegen.scratch_abi import (
+    require_qualified_compiler, validated_hip_scratch_args, validated_scratch_args,
+)
 
 # Kernel pointer element types, keyed by the depth names the runtime sends.
 DEPTH_TO_TRITON = {
@@ -85,7 +89,7 @@ def digest(provider_file, backend):
     """Hash everything that can change generated code for this provider."""
     h = hashlib.sha256()
     h.update(sys.version.encode())
-    h.update(triton.__version__.encode())
+    h.update(triton_key().encode())
     files = [Path(provider_file)]
     files += sorted(Path(__file__).parent.glob("*.py"))
     files += registry_sources(backend)
@@ -136,7 +140,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     launch-grid spec returned to the runtime, which evaluates it against the
     runtime parameter values it never sent here.
     """
-    facts = platforms.platform(request["backend"])
+    facts = platforms.platform(request["backend"], request["target"])
     fn = load_jit_function(request["source"], request["function"])
     _check_arguments(fn, request, tuning)
 
@@ -160,7 +164,13 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         constexprs[name] = value
 
     target = parse_target(request["target"])
+    if target.backend != facts["triton_backend"] or target.warp_size != facts["warp"]:
+        raise ValueError(
+            f"{request['backend']} cannot compile target {request['target']!r}"
+        )
     backend = triton.compiler.make_backend(target)
+    require_qualified_compiler(request["backend"], target.backend, triton.__version__,
+                               target.arch, type(backend).__module__, target.warp_size)
     options = backend.parse_options({"num_warps": num_warps, "num_stages": num_stages})
     # Deliberately no fn.create_binder(): it probes the active driver, which
     # imports torch and initialises a device. ASTSource compilation does not
@@ -171,14 +181,10 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     compiled = triton.compile(source, target=target, options=options.__dict__)
 
     metadata = compiled.metadata
-    # The runtime passes null scratch pointers; a kernel that needs real
-    # scratch memory would silently corrupt memory, so refuse it here.
-    for field in ("global_scratch_size", "profile_scratch_size"):
-        if getattr(metadata, field, 0):
-            raise RuntimeError(
-                f"{request['function']} needs {field}={getattr(metadata, field)}, "
-                "which is not supported"
-            )
+    if target.backend == "hip":
+        scratch_args = validated_hip_scratch_args(metadata, compiled.asm.get("llir"), signature)
+    else:
+        scratch_args = validated_scratch_args(metadata, compiled.asm.get("ptx"), signature)
 
     # The image Triton emits is platform specific: cubin on CUDA-shaped
     # vendors, hsaco/mubin/hgbin on the others, npubin on Ascend.
@@ -188,7 +194,10 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
             f"compiled kernel has no {facts['binary']!r} image; "
             f"available: {sorted(compiled.asm)}"
         )
-    artifact_dir = cache_dir() / "artifacts" / compiled.hash
+    artifact_dir = cache_dir() / "artifacts"
+    if target.backend == "hip":
+        artifact_dir /= request["backend"]
+    artifact_dir /= compiled.hash
     artifact = artifact_dir / f"{metadata.name}.{facts['extension']}"
     if not artifact.is_file():
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +208,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
         os.replace(tmp.name, artifact)
     return {
         "artifact": str(artifact),
+        "scratch_args": scratch_args,
         "function": metadata.name,
         "num_warps": metadata.num_warps,
         "shared": metadata.shared,

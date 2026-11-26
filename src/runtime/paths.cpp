@@ -47,7 +47,7 @@ const std::string& data_dir() {
   static const std::string dir = [] {
     std::string override_dir = env("FLAGCV_DATA_DIR");
     if (!override_dir.empty()) return override_dir;
-    std::string installed = library_dir() + "/../share/flagcv";
+    std::string installed = library_dir() + "/" FLAGCV_DATA_FROM_LIBDIR;
     if (exists(installed + "/compiler/flagcv_codegen/main.py"))
       return installed;
     return std::string(FLAGCV_SOURCE_DIR);

@@ -13,6 +13,7 @@ include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 include(CTest)
 
+option(BUILD_SHARED_LIBS "Build the relocatable FlagCV shared runtime" ON)
 option(FLAGCV_BUILD_TESTS "Build FlagCV tests" ${BUILD_TESTING})
 option(FLAGCV_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 
@@ -31,6 +32,8 @@ function(flagcv_enable_warnings target)
   endif()
 endfunction()
 
+install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv")
+
 add_subdirectory(src)
 add_subdirectory(backends)
 
@@ -39,10 +42,10 @@ install(FILES kernels/registry.json
   DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/kernels")
 install(DIRECTORY kernels/common/
   DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/kernels/common"
-  FILES_MATCHING PATTERN "*.py")
+  FILES_MATCHING PATTERN "*.py" PATTERN "__pycache__" EXCLUDE)
 install(DIRECTORY compiler/
   DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/compiler"
-  FILES_MATCHING PATTERN "*.py")
+  FILES_MATCHING PATTERN "*.py" PATTERN "__pycache__" EXCLUDE)
 
 configure_package_config_file(
   cmake/FlagCVConfig.cmake.in

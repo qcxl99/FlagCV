@@ -1,7 +1,7 @@
 # Python kernel evaluation
 
 FlagCV's Python evaluation workflow supports case listing and selection,
-candidate override, dummy candidate injection, reference as candidate, and
+in-tree candidates, candidate override, dummy candidate injection, reference as candidate, and
 benchmark comparison with a live OpenCV CUDA baseline. Operator tests and benchmarks
 use the root pytest options to expose these capabilities. Each operator defines
 its own callable signature, inputs, and reference.
@@ -11,7 +11,7 @@ Python candidates run independently of the C++ integration.
 Add a default reference in `reference/OP.py` with a callable named
 `reference`, and mark its tests and benchmarks with `@pytest.mark.OP`. The
 runner discovers operators from the reference modules and uses the marker to
-select the reference or the matching `--override` entry. Dummy mode selects
+select the OpenCV CPU reference, the `--builtin` kernel or the matching `--override` entry. Dummy mode selects
 only the operator named by `--dummy-candidate`.
 
 ## Example: add
@@ -24,7 +24,7 @@ implements `add(a, b, dst)`, writes all of `dst`, returns that same tensor and
 leaves both inputs unchanged. The uint8 result saturates at 255.
 
 Run from the repository root. Case listing only requires pytest. Executing
-cases requires Torch and the requested device runtime. Timing uses the
+cases requires Torch, OpenCV Python and the requested device runtime. Timing uses the
 backend's Triton benchmark helper.
 
 ```sh
@@ -44,16 +44,20 @@ select a device explicitly. Unknown vendors and conflicting accelerator device
 types raise an error. Use `--reference FILE:FUNCTION`
 to additionally check an independent oracle with the same signature. This
 compares the selected reference and candidate against the supplied oracle.
-Correctness and `--ref-as-candidate` select the reference by operator and
-device type. Register backend-specific references in `reference/`.
-When there is no backend-specific entry, the runner uses the operator's
-default reference.
+Correctness and `--ref-as-candidate` select the operator's OpenCV CPU reference
+regardless of the candidate device.
 
 Performance comparisons default to `--baseline opencv-cuda`. Each case uses the
 same source tensors with independent preallocated outputs. The runner validates
-candidate and OpenCV outputs against the Torch reference and each other before
+candidate and OpenCV outputs against OpenCV CPU and each other before
 sampling, and checks that inputs are unchanged. It alternates the measurement
-order over `--benchmark-samples` paired samples and reports median latencies.
+order over two paired samples by default (100 ms Triton warmup, 100 ms
+measurement). The timer explicitly requests the median for each round, and the
+two round medians are averaged independently for FlagCV and OpenCV CUDA.
+Use `--benchmark-profile long` for 1000 ms warmup and three pairs, aggregated
+with a median. Both profiles keep the same 100 ms measurement window.
+`--benchmark-samples` can override the count for exploratory runs. The NVIDIA
+merge checker requires the declared profile's exact count and protocol.
 OpenCV errors and missing bridge libraries fail the case. Use `--baseline none`
 explicitly for candidate-only timing; other backends need this mode.
 
@@ -77,8 +81,8 @@ Timing results identify `candidate_source` only after the timer invokes it.
 For compatibility with FlagGems-sglang, `--override` accepts repeated
 `OP:FILE[:FUNCTION]` arguments and the `OP=FILE[:FUNCTION]` spelling.
 `--record json --output FILE` enables result JSON. Case listing always
-writes JSON. Profile, dummy, reference mode and listing are mutually
-exclusive. Duplicate or unknown benchmark case IDs fail explicitly.
+writes JSON. The available candidate sources are builtin, override, dummy and reference.
+Profile replay accepts a builtin or override kernel. Duplicate or unknown benchmark case IDs fail explicitly.
 Tests, benchmark and profile use the shared `runtime.resolve_device` result.
 Set `GEMS_VENDOR` for an explicit vendor selection or leave it unset for
 automatic detection. `--device` preserves explicit device selection.

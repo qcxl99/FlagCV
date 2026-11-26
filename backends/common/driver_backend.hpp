@@ -76,7 +76,7 @@ class Scope {
   ~Scope() {
     if (pushed_) {
       typename Api::Context popped;
-      Api::ctx_pop(&popped);
+      (void)Api::ctx_pop(&popped);
     }
   }
   bool ok() const { return pushed_; }
@@ -115,7 +115,7 @@ template <typename Api>
 void destroy_context(void* context) {
   auto* ctx = static_cast<Context<Api>*>(context);
   if (ctx == nullptr) return;
-  Api::primary_ctx_release(ctx->device);
+  (void)Api::primary_ctx_release(ctx->device);
   delete ctx;
 }
 
@@ -155,7 +155,7 @@ int load(void* context, const void* binary, size_t, const char* function,
   }
   if (Api::module_get_function(&kernel->function, kernel->module, function) !=
       Api::success()) {
-    Api::module_unload(kernel->module);
+    (void)Api::module_unload(kernel->module);
     delete kernel;
     return fail(Api::name(),
                 "the module has no kernel named " + std::string(function));
@@ -165,7 +165,7 @@ int load(void* context, const void* binary, size_t, const char* function,
     if (static_cast<int>(shared_bytes) > limit ||
         Api::set_shared(kernel->function, static_cast<int>(shared_bytes)) !=
             Api::success()) {
-      Api::module_unload(kernel->module);
+      (void)Api::module_unload(kernel->module);
       delete kernel;
       return fail(Api::name(),
                   "kernel needs " + std::to_string(shared_bytes) +
@@ -183,7 +183,7 @@ void unload(void* context, void* kernel_ptr) {
   auto* kernel = static_cast<Kernel<Api>*>(kernel_ptr);
   if (kernel == nullptr) return;
   Scope<Api> scope(ctx->context);
-  Api::module_unload(kernel->module);
+  (void)Api::module_unload(kernel->module);
   delete kernel;
 }
 
@@ -214,7 +214,7 @@ template <typename Api>
 const FlagcvBackendV2* table() {
   static const FlagcvBackendV2 value = {
       FLAGCV_BACKEND_VERSION,
-      1,  // appends_scratch_args: Triton's ABI ends with two scratch pointers
+      1,  // appends_scratch_args: expected by this plugin, checked before load
       create_context<Api>,
       destroy_context<Api>,
       device_id<Api>,

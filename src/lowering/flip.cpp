@@ -21,14 +21,15 @@ LoweredOp lower_flip(const GpuMat& src, const GpuMat& dst, int flip_code) {
       std::numeric_limits<std::int32_t>::max()) {
     throw std::invalid_argument("flip row is too wide");
   }
-  // Each output pixel reads a different input pixel, so in place would race.
-  if (images_overlap(src, dst)) {
-    throw std::invalid_argument(
-        "flip does not support overlapping src and dst");
+  const bool in_place = same_view(src, dst);
+  if (!in_place && images_overlap(src, dst)) {
+    throw std::invalid_argument("flip does not support partial overlap");
   }
 
   LoweredOp op;
   op.kernel = "flip";
+  op.images.reserve(2);
+  op.params.reserve(9);
   op.add_image(s);
   op.add_image(d);
   // width bounds the vectorised row axis and the strides place row starts;
@@ -41,6 +42,8 @@ LoweredOp lower_flip(const GpuMat& src, const GpuMat& dst, int flip_code) {
   // OpenCV: 0 flips around the x-axis, > 0 around the y-axis, < 0 both.
   op.add_constexpr("FLIP_X", flip_code != 0 ? 1 : 0);
   op.add_constexpr("FLIP_Y", flip_code <= 0 ? 1 : 0);
+  op.add_constexpr("IN_PLACE", in_place);
+  op.add_constexpr("VEC4", can_pack_u8x4(s) && can_pack_u8x4(d));
   return op;
 }
 

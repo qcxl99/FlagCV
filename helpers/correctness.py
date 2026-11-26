@@ -47,13 +47,13 @@ def check(
     extra = args[source_count + 1 :]
     snapshots = tuple(source.clone() for source in sources)
     arrays = tuple(source.detach().cpu().numpy() for source in snapshots)
-    expected = torch.from_numpy(oracle(*arrays, *extra)).to(dst.device)
+    audit = torch.from_numpy(oracle(*arrays, *extra)).to(dst.device)
 
     reference = get_reference(op_name, device)
     reference_inputs = tuple(source.clone() for source in snapshots)
-    reference_dst = torch.empty_like(dst)
-    assert reference(*reference_inputs, reference_dst, *extra) is reference_dst
-    assert_output(reference_dst, expected)
+    expected = torch.empty_like(dst)
+    assert reference(*reference_inputs, expected, *extra) is expected
+    assert_output(audit, expected)
     for source, snapshot in zip(reference_inputs, snapshots):
         assert_bitwise_equal(source, snapshot)
 

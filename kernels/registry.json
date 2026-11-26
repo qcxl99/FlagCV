@@ -19,7 +19,7 @@
     {
       "name": "multiply",
       "source": "common/pointwise.py",
-      "function": "pointwise_kernel"
+      "function": "multiply_kernel"
     },
     {
       "name": "bitwise_and",
@@ -30,6 +30,26 @@
       "name": "bitwise_not",
       "source": "common/pointwise.py",
       "function": "pointwise_kernel"
+    },
+    {
+      "name": "add_masked",
+      "source": "common/pointwise.py",
+      "function": "masked_pointwise_kernel"
+    },
+    {
+      "name": "subtract_masked",
+      "source": "common/pointwise.py",
+      "function": "masked_pointwise_kernel"
+    },
+    {
+      "name": "bitwise_and_masked",
+      "source": "common/pointwise.py",
+      "function": "masked_pointwise_kernel"
+    },
+    {
+      "name": "bitwise_not_masked",
+      "source": "common/pointwise.py",
+      "function": "masked_pointwise_kernel"
     }
   ]
 }

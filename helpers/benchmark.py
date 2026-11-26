@@ -8,9 +8,10 @@ from statistics import median
 import pytest
 
 from conftest import emit
+from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES
 
 
-def _measure_ms(candidate, args):
+def _measure_ms(candidate, args, *, warmup_ms=PROFILES["default"].warmup_ms):
     import torch
 
     device = args[0].device
@@ -20,7 +21,8 @@ def _measure_ms(candidate, args):
     from triton.testing import do_bench
 
     with torch.get_device_module(device).device(device):
-        return do_bench(lambda: candidate(*args), warmup=25, rep=100)
+        return do_bench(lambda: candidate(*args), warmup=warmup_ms,
+                        rep=MEASUREMENT_MS, return_mode="median")
 
 
 def _profile(config, case_id, candidate, build):
@@ -75,7 +77,6 @@ def _validate_outputs(op_name, candidate, args, baseline, baseline_args):
     from helpers.tolerance import (
         assert_bitwise_equal,
         assert_exact,
-        assert_one_lsb,
         assert_relative_close,
     )
     from reference import get_reference
@@ -89,7 +90,7 @@ def _validate_outputs(op_name, candidate, args, baseline, baseline_args):
     if op_name == "flip":
         compare = assert_bitwise_equal
     elif dst.dtype == torch.uint8:
-        compare = assert_one_lsb if op_name in ("add", "subtract") else assert_exact
+        compare = assert_exact
     else:
         compare = assert_relative_close
 
@@ -114,6 +115,7 @@ def _validate_outputs(op_name, candidate, args, baseline, baseline_args):
 
 
 def _time_case(config, op_name, candidate, args):
+    protocol = PROFILES[config.getoption("benchmark_profile")]
     baseline = None
     baseline_args = None
     if config.getoption("baseline") == "opencv-cuda":
@@ -137,7 +139,7 @@ def _time_case(config, op_name, candidate, args):
                     calls += 1
                     return function(*values)
 
-                latency = _measure_ms(observed, operands)
+                latency = _measure_ms(observed, operands, warmup_ms=protocol.warmup_ms)
                 assert calls > 0, "Candidate timer did not execute the candidate"
                 assert math.isfinite(latency) and latency > 0
                 (baseline_samples if is_baseline else candidate_samples).append(latency)
@@ -147,6 +149,10 @@ def _time_case(config, op_name, candidate, args):
         speedup = base_latency / latency if base_latency is not None else None
         return {
             "latency": latency,
+            "latency_base": base_latency,
+            "timing_protocol": protocol.name,
+            "warmup_ms": protocol.warmup_ms,
+            "measurement_ms": MEASUREMENT_MS,
             "latency_samples_ms": candidate_samples,
             "base_latency_ms": base_latency,
             "base_latency_samples_ms": baseline_samples,

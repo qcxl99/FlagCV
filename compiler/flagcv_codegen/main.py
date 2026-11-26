@@ -23,9 +23,13 @@ failure carries ``error`` instead of a result. Requests:
    "params": [{"name": "width", "type": "i32"},
               {"name": "CHANNELS", "type": "constexpr", "value": 3}, ...]}
       -> {"id": 2, "ok": true, "artifact": "/abs/.../flip_kernel.cubin",
-          "function": "flip_kernel", "num_warps": 4, "shared": 0,
+          "function": "flip_kernel", "num_warps": 4, "shared": 0, "scratch_args": 2,
           "grid": [{"product": ["width", "CHANNELS"], "block": 512},
                    {"product": ["height"], "block": 4}, 1]}
+
+For a grid dimension with a product, an optional positive ``limit`` caps
+the computed extent. The provider can use another dimension to cover the
+remaining tiles, as the CUDA pitched kernels do for images with many rows.
 
 Runtime parameter values never reach this process: only their types do, so a
 new image size reuses the compiled artifact. Each platform provider lives in
@@ -48,6 +52,8 @@ _PROVIDERS = {}
 
 
 def load_provider(backend):
+    if backend == "hip":
+        raise ValueError("the hip backend was removed; select amd or hygon")
     provider = _PROVIDERS.get(backend)
     if provider is not None:
         return provider

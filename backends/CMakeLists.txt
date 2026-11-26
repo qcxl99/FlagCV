@@ -9,6 +9,13 @@ add_subdirectory(common)
 
 set(_flagcv_backends ${FLAGCV_BACKENDS})
 list(REMOVE_DUPLICATES _flagcv_backends)
+if("hip" IN_LIST _flagcv_backends)
+  message(FATAL_ERROR "FLAGCV_BACKENDS=hip was removed; select amd (ROCm) or hygon (DTK).")
+endif()
+if("amd" IN_LIST _flagcv_backends AND "hygon" IN_LIST _flagcv_backends)
+  message(FATAL_ERROR "Build amd and hygon separately with their own hip_DIR and install trees.")
+endif()
+
 
 foreach(backend IN LISTS _flagcv_backends)
   if(NOT backend MATCHES "^[a-z][a-z0-9_]*$")

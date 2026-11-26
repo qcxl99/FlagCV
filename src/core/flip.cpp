@@ -9,8 +9,7 @@ namespace flagcv {
 
 void flip(Handle& handle, const GpuMat& src, const GpuMat& dst, int flip_code,
           Stream stream) {
-  const LoweredOp op = lower_flip(src, dst, flip_code);
-  launch(handle, op, {src.data(), dst.data()}, stream);
+  launch(handle, lower_flip(src, dst, flip_code), stream);
 }
 
 }  // namespace flagcv

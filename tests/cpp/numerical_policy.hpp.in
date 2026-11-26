@@ -1,0 +1,11 @@
+// Copyright 2026 FlagOS Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+#pragma once
+
+namespace flagcv_test {
+inline constexpr double float16_rtol = @FLAGCV_FP16_RTOL@;
+inline constexpr double float16_atol = @FLAGCV_FP16_ATOL@;
+inline constexpr double float32_rtol = @FLAGCV_FP32_RTOL@;
+inline constexpr double float32_atol = @FLAGCV_FP32_ATOL@;
+}  // namespace flagcv_test

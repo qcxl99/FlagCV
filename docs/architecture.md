@@ -1,9 +1,8 @@
 # FlagCV Architecture
 
 FlagCV is an image processing library with OpenCV-shaped interfaces and
-FlagDNN-shaped multi-backend plumbing. It runs in **immediate mode** only: a
-call does its work and returns. There is no graph to build, no compile step the
-caller drives, and no cross-operator fusion.
+FlagDNN-shaped multi-backend plumbing. The public API immediately enqueues one operator on a caller-owned native
+stream. The runtime invokes compilation on a cache miss.
 
 ## Layers
 
@@ -61,26 +60,75 @@ plugin reports the compile target (`cuda:90:32`), so the compiler imports no
 framework and needs no GPU. The protocol is one JSON object per line; it is
 documented in `compiler/flagcv_codegen/main.py`.
 
-**Cache key.** Kernel name, each image's depth, channel count and whether its
-base pointer is 16-byte aligned, compile-time param values, runtime param
-types, the device, and the compiler identity (a digest of the interpreter,
-Triton version, provider and every registered kernel source). Image sizes and
-strides are runtime params, so a new size reuses the kernel. A runtime param
-the lowering marks with `add_hinted_param` is also specialised on
-divisibility by 16, as Triton's own JIT does, so row accesses can vectorise.
+Each compiler exchange uses a monotonic deadline for writing and reading.
+`FLAGCV_COMPILER_TIMEOUT_MS` defaults to 120000 ms. A timeout discards the
+protocol connection, terminates the compiler's process group and attempts
+bounded reaping. A later request can start a fresh compiler after reaping.
+Closing a Handle releases its loaded modules. At process shutdown the shared
+compiler gets a short EOF grace period before termination.
+
+
+**Loaded modules.** Each Handle owns a cache in the context of its bound
+device. It matches the kernel name and operand/parameter signature, including
+depth, channels, 16-byte base alignment, constexpr values and runtime argument
+types. Runtime image sizes and strides can reuse a module when their types
+and any `add_hinted_param` divisibility classes match. The Runtime queries
+compiler identity once per backend per process. Restart the process after
+changing registered kernels, providers or compiler settings.
 
 **Files.** Compiled binaries go to `$FLAGCV_CACHE_DIR/artifacts/<hash>/`
-(default `~/.cache/flagcv`); Triton's own cache (`~/.triton/cache`) holds the
-intermediate IR. The runtime's kernel cache lives in memory per `Handle`, so
-a new host process restarts the compiler process. Triton can reuse cached
-compilation artifacts, but the compiler process must start and import Triton
-again.
+(default `~/.cache/flagcv`), keyed by Triton's compiled artifact hash.
+The hash reflects target, compiler, options and signature. Triton's own cache
+(`~/.triton/cache`) holds intermediate IR. A new process starts a new compiler
+process and may reuse Triton artifacts. Each Handle still loads its own device
+modules and releases them before the context.
 
 **Locations and overrides.** `FLAGCV_PYTHON` selects the interpreter for the
 compiler process (default `python3`). Kernels, the compiler and platform
-providers are found under `FLAGCV_DATA_DIR`, else `../share/flagcv` next to
-libflagcv, else the source tree it was built from. Plugins are found under
+providers are found under `FLAGCV_DATA_DIR`, else the installed data directory
+relative to libflagcv, else the source tree it was built from. Plugins are found under
 `FLAGCV_PLUGIN_DIR`, else `flagcv/` next to libflagcv, else the build tree.
+
+## Scratch ABI qualification
+
+The public C++ launch path currently qualifies NVIDIA with upstream Triton
+3.6.0. The compiler checks that both scratch allocation sizes are present and
+zero. It also verifies the emitted PTX entry layout against the Runtime
+signature, including the two trailing 64-bit pointer parameters. The Runtime
+compares that count with the backend expectation before loading the binary.
+
+The AMD and Hygon plugins accept separate bounded Triton 3.6.0 compiler/target sets
+(gfx936, gfx938 and gfx1100). Both qualified compiler families emit two
+trailing pointer slots. FlagCV validates their LLVM entry signature and
+checks that both pointers have the `readnone` attribute. The profile scratch
+size must be explicitly zero. Some HIP compilers omit the global size, so
+the unused-pointer proof is required per artifact. An explicit nonzero size
+is rejected. Platform delivery status also requires on-device correctness
+and installation evidence.
+
+Iluvatar, MThreads, T-Head and Ascend need their exact compiler build,
+emitted argument layout, scratch metadata semantics and an on-device public API
+test before enabling native launch. Ascend is excluded from C++ builds until
+its device lifecycle is qualified. Its source rejects Handle creation without
+initializing AscendCL, changing the active device or acquiring device resources.
+The standalone Python evaluation continues to use each compiler's own launcher.
+NVIDIA validation used CUDA sm90 on H20. Other versions and vendor variants
+need a qualification of their own.
+
+The process-group cleanup follows the approach in
+[FlagDNN's compiler client](https://github.com/flagos-ai/FlagDNN/blob/a84bcc18a172fa01597d2fc171ce3af680f3074a/src/runtime/compiler_client.cpp#L671).
+The CUDA parameter order is from the
+[Triton 3.6.0 NVIDIA launcher](https://github.com/triton-lang/triton/blob/v3.6.0/third_party/nvidia/backend/driver.py).
+
+## Ascend enablement
+
+Before enabling the backend, verify that two Handles can use the caller's
+existing context, buffers and native stream. Check that destroying either
+Handle preserves the other Handle, the caller's context and stream, and
+ongoing work. FlagCV must release only its owned module registrations while
+the application retains device reset and AscendCL finalization. Verify the
+error path for a mismatched context or device and the supported CANN/FlagTree
+artifact ABI on the target device.
 
 ## Units: pitch vs stride
 
@@ -95,8 +143,7 @@ carries, kernel arguments — is in elements.
 
 ## Masks
 
-A mask means "do not write", not "write zero". Destination pixels the mask
-excludes keep their prior contents byte-identical. Kernels implement this by
+Where the mask is zero, the destination keeps its prior contents byte-identical. Kernels implement this by
 folding the mask into the store predicate, never with
 `tl.where(mask, result, 0)`. A masked call therefore requires an initialized
 `dst`.
@@ -105,14 +152,13 @@ folding the mask into the store predicate, never with
 
 FlagCV never allocates or frees device memory. `GpuMat` is a non-owning view
 over a buffer the caller owns — unlike `cv::cuda::GpuMat`, which owns its
-data. Lifetime is the caller's problem.
+data. The caller keeps all buffers, the stream and the Handle alive until the enqueued work completes.
 
 ## Plugin boundary
 
-Plugins include `backends/backend.hpp` and nothing else from the tree. They
-receive operand layouts and params as plain data, so adding a field to a core
-struct is not an ABI break. A plugin that includes a core internal header has
-broken the contract.
+Plugins use the ABI in `backends/backend.hpp` and may share internal helpers
+in `backends/common`. They receive operand layouts and params as plain data
+and do not include core internal headers.
 
 ### Backends
 
@@ -120,25 +166,37 @@ broken the contract.
 |---|---|---|---|---|
 | `nvidia` | `cuda.h` | `.cubin` | 32 | |
 | `iluvatar` | CoreX `cuda.h` | `.cubin` | 64 | needs `CUDAToolkit_ROOT` pointed at CoreX |
-| `hygon` | `hip/hip_runtime.h` | `.hsaco` | 64 | |
+| `amd` | `hip/hip_runtime.h` | `.hsaco` | 32 | AMD ROCm |
+| `hygon` | `hip/hip_runtime.h` | `.hsaco` | 64 | Hygon DTK |
 | `mthreads` | `musa.h` | `.mubin` | 32 | Triton backend name is `mtgpu` |
 | `thead` | `hggc.h` | `.hgbin` | 32 | Triton backend name is `PPU` |
-| `ascend` | `acl/acl.h`, `rt.h` | `.npubin` | 1 | runtime registration, packed args |
+| `ascend` (unavailable) | `acl/acl.h`, `rt.h` | `.npubin` | 1 | preview source, excluded from C++ builds |
 
-Five of them share one implementation, `backends/common/driver_backend.hpp`:
+The module-based plugins share `backends/common/driver_backend.hpp`:
 their driver APIs have the CUDA shape (init, primary context, push/pop, load
 module from bytes, get function, launch with an argument array), so a plugin
 is just an `Api` struct naming its own calls. Ascend does not have that shape
 — it registers the binary with the runtime and passes a packed argument
 buffer — so it implements the table itself and sets
-`appends_scratch_args = 0`, because Triton's Ascend ABI has no trailing
-scratch pointers.
+`appends_scratch_args = 0` in the preview code. This is a provisional ABI
+expectation and must be verified against the target CANN/FlagTree build before
+enabling Ascend.
 
-The plugin also reports the compile target (`cuda:90:32`, `hip:gfx942:64`,
+AMD and Hygon share the internal HIP driver and thread-local device binding.
+Their plugins resolve the SDK independently in separate build trees. Their
+backend names, providers, registries and published artifact paths are distinct.
+
+The plugin also reports the compile target (`cuda:90:32`, `hip:gfx936:64`,
 ...) and the Triton backend name, which is what lets the compiler process
 build for a device it never touches. The platform facts the compiler needs —
 artifact format, Triton backend name, element-block and warp limits — are in
 `compiler/flagcv_codegen/platform.py`.
 
-Only the NVIDIA backend has been compiled and run; the other five follow the
-same contract but have not been built against their SDKs here.
+The [operator inventory](operators.md) and [HIP validation](hip-validation.md)
+track which device/toolchain combinations have native evidence. Plugin
+buildability and offline ABI checks are recorded separately.
+
+The runtime and provider split follows the FlagDNN approach. Python operator
+evaluation retains the case, candidate and JSON interfaces used by FlagGems.
+[FlagDNN](https://github.com/flagos-ai/FlagDNN) ·
+[FlagGems](https://github.com/flagos-ai/FlagGems)

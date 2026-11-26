@@ -8,7 +8,6 @@ from helpers.correctness import poison_output
 from helpers.tolerance import (
     assert_bitwise_equal,
     assert_exact,
-    assert_one_lsb,
     assert_relative_close,
 )
 from reference import get_reference
@@ -35,7 +34,7 @@ def test_add(shape, dtype, fixed_inputs, candidate, native_reference, pytestconf
 
     a, b, dst = inputs()
     a_before, b_before = a.clone(), b.clone()
-    assert_output = assert_one_lsb if dtype == "uint8" else assert_relative_close
+    assert_output = assert_exact if dtype == "uint8" else assert_relative_close
     reference = get_reference("add", device)
     expected = reference(a_before, b_before, torch.empty_like(dst))
     if case == SATURATION_CASE:

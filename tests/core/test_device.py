@@ -78,3 +78,46 @@ def test_detection_failure_is_explicit(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="No accelerator detected"):
         runtime._detect_vendor(torch)
+
+
+@pytest.mark.parametrize("requested,arch,wave,valid", [
+    ("amd", "gfx1100", 32, True),
+    ("hygon", "gfx936", 64, True),
+    ("hygon", "gfx938", 64, True),
+    ("amd", "gfx936", 64, False),
+    ("amd", "gfx938", 64, False),
+    ("hygon", "gfx1100", 32, False),
+    ("hygon", "gfx938", 32, False),
+    ("amd", "gfx942", 64, False),
+])
+def test_explicit_hip_vendor_checks_actual_target(monkeypatch, requested, arch, wave, valid):
+    from contextlib import contextmanager
+
+    selected = []
+
+    @contextmanager
+    def use_device(index):
+        selected.append(index)
+        yield
+
+    torch = SimpleNamespace(version=SimpleNamespace(hip="6"),
+                            device=lambda selection: SimpleNamespace(index=int(selection.split(":")[1])),
+                            cuda=SimpleNamespace(device=use_device))
+    target = SimpleNamespace(backend="hip", arch=arch, warp_size=wave)
+    triton = SimpleNamespace(runtime=SimpleNamespace(driver=SimpleNamespace(
+        active=SimpleNamespace(get_current_target=lambda: target))))
+    monkeypatch.setenv("GEMS_VENDOR", requested)
+    monkeypatch.setattr(runtime, "_torch_runtime", lambda: torch)
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda name: triton)
+    if valid:
+        assert runtime.resolve_device("cuda:1") == runtime.RuntimeDevice(requested, "cuda:1")
+    else:
+        with pytest.raises(ValueError, match="does not match|unsupported HIP"):
+            runtime.resolve_device("cuda:1")
+    assert selected == [1]
+
+
+def test_removed_hip_vendor(monkeypatch):
+    monkeypatch.setenv("GEMS_VENDOR", "hip")
+    with pytest.raises(ValueError, match="removed; select amd or hygon"):
+        runtime.resolve_device("cuda:0")

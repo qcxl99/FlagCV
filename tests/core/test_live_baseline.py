@@ -9,7 +9,7 @@ from helpers import benchmark
 
 def config(baseline="opencv-cuda"):
     return SimpleNamespace(
-        getoption={"baseline": baseline, "benchmark_samples": 3}.__getitem__,
+        getoption={"baseline": baseline, "benchmark_samples": 3, "benchmark_profile": "default"}.__getitem__,
         _flagcv_runtime=SimpleNamespace(vendor="nvidia"),
         _evaluation=SimpleNamespace(timings=0),
     )
@@ -46,7 +46,7 @@ def test_invalid_output_fails_before_timing(monkeypatch, broken):
     monkeypatch.setattr(
         benchmark, "_prepare_baseline", lambda *a: (Baseline(), baseline_args)
     )
-    monkeypatch.setattr(benchmark, "_measure_ms", lambda *a: timings.append(True))
+    monkeypatch.setattr(benchmark, "_measure_ms", lambda *a, **kw: timings.append(True))
     with pytest.raises(AssertionError):
         benchmark._time_case(config(), "add", candidate, args)
     assert not timings
@@ -69,7 +69,7 @@ def test_paired_samples_alternate_and_check_both_timers(monkeypatch):
     monkeypatch.setattr(benchmark, "_prepare_baseline", lambda *a: (Baseline(), ()))
     monkeypatch.setattr(benchmark, "_validate_outputs", lambda *a: None)
 
-    def measure(function, args):
+    def measure(function, args, *, warmup_ms):
         function(*args)
         return 2.0 if calls[-1] == "candidate" else 8.0
 

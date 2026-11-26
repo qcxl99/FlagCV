@@ -4,13 +4,18 @@
 
 #include <dlfcn.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <memory_resource>
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 
 #include "backends/backend.hpp"
@@ -50,12 +55,16 @@ const char* depth_name(Depth depth) {
  * a common source of shutdown crashes, and the mapping is small.
  */
 const FlagcvBackendV2& load_plugin(const std::string& backend) {
+  if (backend == "hip")
+    throw Error("flagcv: the hip backend was removed; select amd (ROCm) or hygon (DTK).");
   static std::mutex mutex;
   static std::map<std::string, const FlagcvBackendV2*> plugins;
   std::lock_guard<std::mutex> lock(mutex);
   auto it = plugins.find(backend);
   if (it != plugins.end()) return *it->second;
 
+  if (backend.empty() || backend.find_first_not_of('_') == std::string::npos)
+    throw Error("flagcv: invalid backend name '" + backend + "'");
   for (char c : backend) {
     if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) {
       throw Error("flagcv: invalid backend name '" + backend + "'");
@@ -69,10 +78,13 @@ const FlagcvBackendV2& load_plugin(const std::string& backend) {
   }
   auto entry = reinterpret_cast<FlagcvBackendEntry>(
       ::dlsym(library, FLAGCV_BACKEND_ENTRY));
-  if (entry == nullptr)
+  if (entry == nullptr) {
+    ::dlclose(library);
     throw Error("flagcv: " + path + " does not export " FLAGCV_BACKEND_ENTRY);
+  }
   const FlagcvBackendV2* table = entry();
   if (table == nullptr || table->version != FLAGCV_BACKEND_VERSION) {
+    ::dlclose(library);
     throw Error("flagcv: " + path +
                 " was built against a different plugin interface version");
   }
@@ -90,15 +102,19 @@ std::string read_file(const std::string& path) {
 /* One grid dimension: a fixed extent, or ceil(product of params / block). */
 struct GridDim {
   std::int64_t fixed = 1;
-  std::vector<std::string> product;
+  std::vector<std::size_t> product;
   std::int64_t block = 1;
+  std::int64_t limit = std::numeric_limits<std::int64_t>::max();
 };
 
 struct LoadedKernel {
+  std::string_view name;
+  std::vector<std::int64_t> signature;
   void* kernel = nullptr;
   unsigned int block_threads = 0;
   unsigned int shared_bytes = 0;
   GridDim grid[3];
+  bool appends_scratch_args = false;
 };
 
 /* Compiler identity per backend, asked once per process. */
@@ -115,9 +131,7 @@ const std::string& compiler_identity(const std::string& backend) {
   return it->second;
 }
 
-bool aligned16(const void* pointer) {
-  return reinterpret_cast<std::uintptr_t>(pointer) % 16 == 0;
-}
+bool aligned16(std::uint64_t address) { return address % 16 == 0; }
 
 bool fits_i32(std::int64_t value) {
   return value >= std::numeric_limits<std::int32_t>::min() &&
@@ -133,6 +147,18 @@ bool divisible16(const LoweredOp::Param& param) {
   return param.divisibility_hint && param.value % 16 == 0;
 }
 
+std::int64_t signature_value(const ImageSpec& image) {
+  return (std::int64_t{image.channels} << 8) |
+         (static_cast<int>(image.depth) << 1) | aligned16(image.address);
+}
+
+std::int64_t signature_value(const LoweredOp::Param& param) {
+  // For each registry name, the ordering and constexpr positions are fixed
+  // by lowering. Runtime values contribute their ABI and alignment only.
+  return param.compile_time ? param.value
+                            : (fits_i32(param.value) << 1) | divisible16(param);
+}
+
 }  // namespace
 
 struct Handle::State {
@@ -143,7 +169,7 @@ struct Handle::State {
   std::string device_id;
   std::string target;
   std::string compiler_identity;  // fetched on the first launch
-  std::unordered_map<std::string, LoadedKernel> kernels;
+  std::unordered_multimap<std::size_t, LoadedKernel> kernels;
 
   ~State() {
     // The cache goes before the plugin context it was loaded into.
@@ -155,7 +181,10 @@ struct Handle::State {
 };
 
 struct HandleAccess {
-  static Handle::State& state(Handle& handle) { return *handle.state_; }
+  static Handle::State& state(Handle& handle) {
+    if (!handle.state_) throw Error("flagcv: handle was moved from");
+    return *handle.state_;
+  }
 };
 
 Handle::Handle(const std::string& backend, int device) : state_(new State) {
@@ -168,19 +197,22 @@ Handle::Handle(const std::string& backend, int device) : state_(new State) {
     throw Error(std::string("flagcv: ") + plugin.last_error());
   }
   char buffer[256];
-  if (plugin.device_id(state_->context, buffer, sizeof(buffer)) != 0)
-    throw Error(plugin.last_error());
-  state_->device_id = buffer;
   if (plugin.target(state_->context, buffer, sizeof(buffer)) != 0)
     throw Error(plugin.last_error());
   state_->target = buffer;
+  if (plugin.device_id(state_->context, buffer, sizeof(buffer)) != 0)
+    throw Error(plugin.last_error());
+  state_->device_id = buffer;
 }
 
 Handle::~Handle() = default;
 Handle::Handle(Handle&&) noexcept = default;
 Handle& Handle::operator=(Handle&&) noexcept = default;
 
-const std::string& Handle::backend() const { return state_->backend; }
+const std::string& Handle::backend() const {
+  if (!state_) throw Error("flagcv: handle was moved from");
+  return state_->backend;
+}
 
 ResolvedKernel resolve_kernel(const std::string& backend,
                               const std::string& kernel) {
@@ -193,10 +225,13 @@ ResolvedKernel resolve_kernel(const std::string& backend,
 
   for (const auto& tier : tiers) {
     const std::string registry_path = tier.dir + "/registry.json";
-    std::ifstream probe(registry_path);
-    if (!probe) {
-      if (tier.platform) continue;  // a platform may ship no registry at all
-      throw Error("flagcv: missing kernel registry " + registry_path);
+    std::error_code inspection_error;
+    const auto status = std::filesystem::symlink_status(registry_path, inspection_error);
+    if (status.type() == std::filesystem::file_type::not_found && tier.platform)
+      continue;
+    if (inspection_error) {
+      throw Error("flagcv: cannot inspect kernel registry " + registry_path +
+                  ": " + inspection_error.message());
     }
     json::Value registry = json::Value::parse(read_file(registry_path));
     for (const json::Value& entry : registry.at("kernels").as_array()) {
@@ -211,42 +246,43 @@ ResolvedKernel resolve_kernel(const std::string& backend,
               backend + "'");
 }
 
-void launch(Handle& handle, const LoweredOp& op,
-            const std::vector<void*>& pointers, Stream stream) {
+void launch_pointwise(Handle& handle, const GpuMat& src1, const GpuMat& src2,
+                      const GpuMat& dst, const GpuMat* mask,
+                      PointwiseMode mode, Stream stream, double scale) {
+  launch(handle, lower_pointwise(src1, src2, dst, mask, mode, scale), stream);
+}
+
+void launch(Handle& handle, LoweredOp op, Stream stream) {
   auto& state = HandleAccess::state(handle);
   const FlagcvBackendV2& plugin = *state.plugin;
-  if (pointers.size() != op.images.size()) {
-    throw Error("flagcv: launch got " + std::to_string(pointers.size()) +
-                " pointers for " + std::to_string(op.images.size()) +
-                " images");
-  }
-
-  // Cache key: everything that changes the compiled binary, nothing that
-  // does not. Pixel values, extents and strides stay out; runtime params
-  // contribute only their width. The compiler identity covers the kernel
-  // sources, provider and toolchain versions.
   if (state.compiler_identity.empty())
     state.compiler_identity = compiler_identity(state.backend);
-  std::ostringstream key;
-  key << op.kernel;
-  for (std::size_t i = 0; i < op.images.size(); ++i) {
-    key << '|' << depth_name(op.images[i].depth) << 'c' << op.images[i].channels
-        << (aligned16(pointers[i]) ? "a16" : "a1");
-  }
-  for (const auto& param : op.params) {
-    key << '|' << param.name << '=';
-    if (param.compile_time)
-      key << param.value;
-    else
-      key << runtime_type(param.value) << (divisible16(param) ? ":16" : "");
-  }
-  key << '|' << state.device_id << '|' << state.compiler_identity;
 
-  auto it = state.kernels.find(key.str());
-  if (it == state.kernels.end()) {
+  // Per-handle variants share the device, provider and compiler identity.
+  // Use scratch storage for the lookup and keep an owned signature on misses.
+  std::byte lookup_storage[256];
+  std::pmr::monotonic_buffer_resource lookup_memory(lookup_storage, sizeof(lookup_storage));
+  std::pmr::vector<std::int64_t> signature(&lookup_memory);
+  signature.reserve(op.images.size() + op.params.size());
+  const std::string_view kernel_name(op.kernel);
+  std::size_t hash = std::hash<std::string_view>{}(kernel_name);
+  auto add_signature = [&](std::int64_t value) {
+    signature.push_back(value);
+    hash ^= std::hash<std::int64_t>{}(value) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+  };
+  for (const auto& image : op.images) add_signature(signature_value(image));
+  for (const auto& param : op.params) add_signature(signature_value(param));
+
+  auto [it, end] = state.kernels.equal_range(hash);
+  for (; it != end; ++it) {
+    const auto& candidate = it->second;
+    if (candidate.name == kernel_name &&
+        std::equal(signature.begin(), signature.end(),
+                   candidate.signature.begin(), candidate.signature.end()))
+      break;
+  }
+  if (it == end) {
     const ResolvedKernel resolved = resolve_kernel(state.backend, op.kernel);
-    const std::string full_key = key.str();
-
     std::ostringstream body;
     body << "\"op\":\"compile\",\"backend\":" << json::quote(state.backend)
          << ",\"target\":" << json::quote(state.target)
@@ -261,7 +297,7 @@ void launch(Handle& handle, const LoweredOp& op,
       body << (i ? "," : "") << "{\"name\":" << json::quote(image.name)
            << ",\"depth\":\"" << depth_name(image.depth)
            << "\",\"channels\":" << image.channels
-           << ",\"aligned16\":" << (aligned16(pointers[i]) ? "true" : "false")
+           << ",\"aligned16\":" << (aligned16(image.address) ? "true" : "false")
            << "}";
     }
     body << "],\"params\":[";
@@ -278,9 +314,17 @@ void launch(Handle& handle, const LoweredOp& op,
     body << "]";
 
     json::Value reply = CompilerClient::instance().request(body.str());
+    const int expected_scratch_args = plugin.appends_scratch_args ? 2 : 0;
+    if (!reply.has("scratch_args") || !reply.at("scratch_args").is_number() ||
+        reply.at("scratch_args").as_number() != expected_scratch_args)
+      throw Error("flagcv: compiler scratch ABI does not match backend '" +
+                  state.backend + "'");
     const std::string binary = read_file(reply.at("artifact").as_string());
 
     LoadedKernel loaded;
+    loaded.name = kernel_name;
+    loaded.signature.assign(signature.begin(), signature.end());
+    loaded.appends_scratch_args = expected_scratch_args != 0;
     const std::int64_t warp_size =
         std::stoll(state.target.substr(state.target.rfind(':') + 1));
     loaded.block_threads =
@@ -295,20 +339,28 @@ void launch(Handle& handle, const LoweredOp& op,
         loaded.grid[d].fixed = grid[d].as_int();
         continue;
       }
-      for (const auto& name : grid[d].at("product").as_array())
-        loaded.grid[d].product.push_back(name.as_string());
+      for (const auto& item : grid[d].at("product").as_array()) {
+        const auto name = item.as_string();
+        auto param = std::find_if(op.params.begin(), op.params.end(),
+                                  [&](const auto& p) { return p.name == name; });
+        if (param == op.params.end())
+          throw Error("flagcv: grid refers to unknown param '" + name + "'");
+        loaded.grid[d].product.push_back(std::distance(op.params.begin(), param));
+      }
       loaded.grid[d].block = grid[d].at("block").as_int();
+      if (grid[d].has("limit")) loaded.grid[d].limit = grid[d].at("limit").as_int();
     }
     const unsigned int flags =
         reply.has("load_flags")
             ? static_cast<unsigned int>(reply.at("load_flags").as_int())
             : 0u;
-    if (plugin.load(state.context, binary.data(), binary.size(),
-                    reply.at("function").as_string().c_str(),
-                    loaded.shared_bytes, flags, &loaded.kernel) != 0) {
+    const auto function = reply.at("function").as_string();
+    it = state.kernels.emplace(hash, std::move(loaded));
+    if (plugin.load(state.context, binary.data(), binary.size(), function.c_str(),
+                    it->second.shared_bytes, flags, &it->second.kernel) != 0) {
+      state.kernels.erase(it);
       throw Error(plugin.last_error());
     }
-    it = state.kernels.emplace(full_key, loaded).first;
   }
   const LoadedKernel& kernel = it->second;
 
@@ -317,21 +369,18 @@ void launch(Handle& handle, const LoweredOp& op,
     std::int64_t extent = kernel.grid[d].fixed;
     if (!kernel.grid[d].product.empty()) {
       std::int64_t total = 1;
-      for (const auto& name : kernel.grid[d].product) {
-        bool found = false;
-        for (const auto& param : op.params) {
-          if (param.name == name) {
-            total *= param.value;
-            found = true;
-            break;
-          }
-        }
-        if (!found)
-          throw Error("flagcv: grid refers to unknown param '" + name + "'");
+      for (const auto index : kernel.grid[d].product) {
+        const auto value = op.params[index].value;
+        if (value <= 0 || total > std::numeric_limits<std::int64_t>::max() / value)
+          throw Error("flagcv: invalid launch grid parameter");
+        total *= value;
       }
-      extent = (total + kernel.grid[d].block - 1) / kernel.grid[d].block;
+      const auto block = kernel.grid[d].block;
+      if (block <= 0) throw Error("flagcv: invalid launch grid block size");
+      extent = std::min(total / block + (total % block != 0),
+                        kernel.grid[d].limit);
     }
-    if (extent < 0 || extent > std::numeric_limits<unsigned int>::max()) {
+    if (extent <= 0 || extent > std::numeric_limits<unsigned int>::max()) {
       throw Error("flagcv: launch grid dimension out of range");
     }
     grid[d] = static_cast<unsigned int>(extent);
@@ -341,16 +390,18 @@ void launch(Handle& handle, const LoweredOp& op,
   // `kinds` records each argument's width in the same order: 0 for an 8-byte
   // value (device pointer or i64), 1 for a 4-byte one (i32). Only Ascend's
   // packed launch needs it; the others launch from the pointer array alone.
-  std::vector<std::uint64_t> device_ptrs(pointers.size());
-  std::vector<std::int64_t> wide;
-  std::vector<std::int32_t> narrow;
+  std::byte argument_storage[640];
+  std::pmr::monotonic_buffer_resource argument_memory(argument_storage, sizeof(argument_storage));
+  std::pmr::vector<std::int64_t> wide(&argument_memory);
+  std::pmr::vector<std::int32_t> narrow(&argument_memory);
+  std::pmr::vector<void*> args(&argument_memory);
+  std::pmr::vector<unsigned int> kinds(&argument_memory);
   wide.reserve(op.params.size());
   narrow.reserve(op.params.size());
-  std::vector<void*> args;
-  std::vector<unsigned int> kinds;
-  for (std::size_t i = 0; i < pointers.size(); ++i) {
-    device_ptrs[i] = reinterpret_cast<std::uintptr_t>(pointers[i]);
-    args.push_back(&device_ptrs[i]);
+  args.reserve(op.images.size() + op.params.size() + 2);
+  kinds.reserve(args.capacity());
+  for (auto& image : op.images) {
+    args.push_back(&image.address);
     kinds.push_back(0);
   }
   for (const auto& param : op.params) {
@@ -366,9 +417,8 @@ void launch(Handle& handle, const LoweredOp& op,
     }
   }
   std::uint64_t global_scratch = 0, profile_scratch = 0;
-  if (plugin.appends_scratch_args) {
-    // Triton's ABI ends with two scratch pointers. The compiler rejects any
-    // kernel that needs real scratch memory, so null is correct here.
+  if (kernel.appends_scratch_args) {
+    // The compiler verified both pointer slots and zero allocation sizes.
     args.push_back(&global_scratch);
     args.push_back(&profile_scratch);
     kinds.push_back(0);

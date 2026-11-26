@@ -8,8 +8,6 @@
 #include "src/image/types.hpp"
 
 #include <cstdint>
-#include <string>
-#include <utility>
 #include <vector>
 
 namespace flagcv {
@@ -37,7 +35,7 @@ struct LoweredOp {
    * counts.
    */
   struct Param {
-    std::string name;
+    const char* name;
     std::int64_t value = 0;
     bool compile_time = false;
     /*
@@ -51,7 +49,7 @@ struct LoweredOp {
   };
 
   /* Registry key naming the kernel to resolve. */
-  std::string kernel;
+  const char* kernel = nullptr;
 
   /* Image operands in kernel argument order. */
   std::vector<ImageSpec> images;
@@ -64,17 +62,17 @@ struct LoweredOp {
 
   void add_image(const ImageSpec& image) { images.push_back(image); }
 
-  void add_param(std::string name, std::int64_t value) {
-    params.push_back(Param{std::move(name), value, false, false});
+  void add_param(const char* name, std::int64_t value) {
+    params.push_back(Param{name, value, false, false});
   }
 
   /* A runtime param that also specialises on % 16; see divisibility_hint. */
-  void add_hinted_param(std::string name, std::int64_t value) {
-    params.push_back(Param{std::move(name), value, false, true});
+  void add_hinted_param(const char* name, std::int64_t value) {
+    params.push_back(Param{name, value, false, true});
   }
 
-  void add_constexpr(std::string name, std::int64_t value) {
-    params.push_back(Param{std::move(name), value, true, false});
+  void add_constexpr(const char* name, std::int64_t value) {
+    params.push_back(Param{name, value, true, false});
   }
 };
 
@@ -88,7 +86,8 @@ struct LoweredOp {
 
 enum class PointwiseMode { kAdd, kSubtract, kMultiply, kAnd, kNot };
 LoweredOp lower_pointwise(const GpuMat& src1, const GpuMat& src2,
-                          const GpuMat& dst, PointwiseMode mode);
+                          const GpuMat& dst, const GpuMat* mask,
+                          PointwiseMode mode, double scale = 1.0);
 
 /* flip: flip_code == 0 mirrors rows, > 0 mirrors columns, < 0 both. */
 LoweredOp lower_flip(const GpuMat& src, const GpuMat& dst, int flip_code);
