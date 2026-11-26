@@ -135,12 +135,14 @@ def point_plan(call, large_u8_otsu):
     return launch
 
 
-def spatial_call(operation, depth, source, target, ksize, edge, two_pass, weights):
+def spatial_call(operation, depth, source, target, ksize, edge, two_pass, weights, *,
+                 dst_depth=-1, delta=0):
     h, w, channels = source.shape
     if operation == "gauss":
         state = lib.ready_gaussian(w, h, depth, ksize, ksize, 0, 0, edge)
     else:
-        state = lib.ready_filter(w, h, depth, -1, ksize, ksize, weights.ctypes.data, -1, -1, 0, edge)
+        state = lib.ready_filter(w, h, depth, dst_depth, ksize, ksize,
+                                 weights.ctypes.data, -1, -1, delta, edge)
     if not state:
         raise RuntimeError(lib.last_message().decode())
     inner = torch.empty_like(source, dtype=torch.int32 if depth in (0, 2) else source.dtype) if two_pass else None

@@ -180,9 +180,11 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
                                  (channels == 3 && data.has_nonzero_delta && (dst_u16 || dst_f32)));
   const bool dft = area >= 50 && !data.fp32_integer_exact && u16_route &&
                    (data.fp64_u16_exact || data.fp64_u16_pair_exact);
-  const bool scaled = channels == 1 && std::abs(delta) >= std::numeric_limits<double>::epsilon();
+  const bool use_u8_wide = channels == 3 && data.u8_dominant_exact;
+  const bool scaled = use_u8_wide ? data.has_nonzero_delta :
+      channels == 1 && std::abs(delta) >= std::numeric_limits<double>::epsilon();
   const Size vector = dft && scaled ? dft_vector_extent(dst, data.kernel) : Size{0, 0};
-  const bool use_dft = dft && vector.width >= 0;
+  const bool use_dft = use_u8_wide || (dft && vector.width >= 0);
   const bool use_exact = !use_dft && area >= 50 && u16 && dst_u16 && !data.has_nonzero_delta &&
                          !data.fp32_integer_exact && data.u16_exact_unit != std::numeric_limits<int>::max();
   const bool dense_pair_candidate =
@@ -219,10 +221,10 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
     op.add_param("vector_rows", vector.height);
     op.add_constexpr("CHANNELS", channels);
     op.add_constexpr("BORDER", border_code(data.border));
-    op.add_constexpr("ADD_F32_DELTA", channels != 1 && data.has_nonzero_delta);
+    op.add_constexpr("ADD_F32_DELTA", !use_u8_wide && channels != 1 && data.has_nonzero_delta);
     op.add_constexpr("SCALED", scaled);
     op.add_constexpr("DEST_U16", dst_u16);
-    op.add_constexpr("COMPENSATED", !data.fp64_u16_exact);
+    op.add_constexpr("COMPENSATED", !use_u8_wide && !data.fp64_u16_exact);
     return op;
   }
   common_constants(op, src.channels(), data.border, data.destination_depth == Depth::k64F);

@@ -8,6 +8,7 @@
 #include "src/runtime/runtime.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -222,6 +223,48 @@ class U16CorrelationBound {
   int max_bit_ = std::numeric_limits<int>::min();
 };
 
+bool effective_normal_f32(double raw, double& value) {
+  const auto bits = coefficient_magnitude_bits(raw);
+  if (bits == 0) {
+    value = 0;
+    return true;
+  }
+  std::uint32_t significand;
+  int exponent;
+  if (!normal_f32_significand(bits, significand, exponent)) return false;
+  value = std::copysign(std::ldexp(static_cast<double>(significand), exponent), raw);
+  return true;
+}
+
+bool dominant_u8_taps(const double* weights, int count, double delta) {
+  double effective_delta;
+  if (!effective_normal_f32(delta, effective_delta) ||
+      coefficient_magnitude_bits(delta) != coefficient_magnitude_bits(effective_delta))
+    return false;
+  U16CorrelationBound bound;
+  bound.add(delta, 1);
+  bound.add(65535, 1);
+  std::array<double, 3> taps{};
+  int nonzero = 0;
+  for (int i = 0; i < count; ++i) {
+    if (!coefficient_magnitude_bits(weights[i])) continue;
+    if (nonzero == 3 || !effective_normal_f32(weights[i], taps[nonzero])) return false;
+    ++nonzero;
+    bound.add(weights[i], 255);
+  }
+  if (nonzero < 2 || !bound.exact()) return false;
+  std::sort(taps.begin(), taps.end());
+  const auto amplitude = taps[2];
+  if (amplitude <= 0 || taps[0] != -amplitude) return false;
+  const auto residual_end = effective_delta + 255 * taps[1];
+  const auto low = std::min(effective_delta, residual_end);
+  const auto high = std::max(effective_delta, residual_end);
+  // Keep ample headroom from the CPU's signed conversion boundary and
+  // require a one-unit change in the opposing samples to imply saturation.
+  return 255 * (2 * amplitude + std::abs(taps[1])) + std::abs(effective_delta) < 0x1p30 &&
+         amplitude >= std::max(high, 65535 - low);
+}
+
 void check_coefficient(double value, bool work_double) {
   if (!std::isfinite(value) ||
       (!work_double && std::abs(value) > std::numeric_limits<float>::max()))
@@ -313,11 +356,15 @@ Filter2DPlan::Filter2DPlan(Size kernel, const double* coefficients, Depth source
       if (fp32_integer_exact) absolute_tap_sum += static_cast<std::uint32_t>(magnitude);
     }
   }
+  const bool u8_dominant_exact = source == Depth::k8U && destination == Depth::k16U &&
+      kernel.width == 9 && kernel.height == 9 && anchor.x == 4 && anchor.y == 4 &&
+      (options.border == Border::kConstant || options.border == Border::kReflect) &&
+      dominant_u8_taps(coefficients, count, options.delta);
   data_ = std::make_shared<Data>(Data{kernel, source, destination, options.border, anchor,
                                      zero_filter, all_normal_f32_taps, fp32_integer_exact, bound_u16 && bound.exact(),
                                      bound_u16 && bound.pair_exact(), has_nonzero_delta,
                                      bound_u16 ? bound.integer_unit() : std::numeric_limits<int>::max(),
-                                     std::move(table)});
+                                     u8_dominant_exact, std::move(table)});
 }
 
 HostTableData Filter2DPlan::table() const {
