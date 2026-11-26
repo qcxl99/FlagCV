@@ -2,7 +2,9 @@
 
 FlagCV provides immediate-mode GPU image processing through OpenCV-shaped C++
 interfaces and a standalone runtime. The NVIDIA delivery covers add, subtract,
-multiply, bitwise AND, bitwise NOT, and flip. The public library uses caller-owned
+multiply, bitwise AND, bitwise NOT, and flip. The shared image-processing
+interfaces include resize, warpAffine, cvtColor, warpPerspective, remap,
+copyMakeBorder, GaussianBlur, filter2D and threshold. The public library uses caller-owned
 image memory and native streams. Triton compilation runs in a separate Python
 process.
 
@@ -37,6 +39,8 @@ For Iluvatar, use `-DCUDAToolkit_ROOT=<corex>`.
 
 C++ interface conventions and the call path are documented in
 [C++ operator interfaces](docs/cpp-operators.md).
+See [installed Imgproc validation](docs/imgproc-live.md) for public C++ and
+Python JIT checks against a relocated prefix on NVIDIA and HIP.
 
 Ascend C++ is unavailable in this build. Selecting `ascend` in
 `FLAGCV_BACKENDS` fails at configure time. Enablement requires verification

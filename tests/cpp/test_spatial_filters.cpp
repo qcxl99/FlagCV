@@ -568,7 +568,15 @@ int main(int argc, char** argv) {
     Image u16(1, 2, CV_16UC1, 1, 1, 2), result(1, 2, CV_16UC1, 2, 1, 1);
     constexpr double overflow[] = {65536};
     u16.host.setTo(cv::Scalar::all(65535));
-    correlation_case(handle, upload, custom, u16, result, {1, 1}, overflow, {{}, {}, 0, Border::kConstant}, 0);
+    const Filter2DPlan overflow_plan({1, 1}, overflow, Depth::k16U,
+                                     {{}, {}, 0, Border::kConstant});
+    // 65535 * 65536 is a finite positive result beyond the U16 range.
+    const cv::Mat saturated(1, 2, CV_16UC1, cv::Scalar::all(65535));
+    result.host.setTo(cv::Scalar::all(17));
+    execute(handle, upload, custom, u16, result, overflow_plan.table(), saturated,
+            [&](auto& h, const auto& s, const auto& d, auto table, auto stream) {
+              flagcv::filter2D(h, s, d, overflow_plan, table, stream);
+            });
     constexpr double contraction[] = {4097};
     u16.host.setTo(cv::Scalar::all(4097));
     correlation_case(handle, upload, custom, u16, result, {1, 1}, contraction,

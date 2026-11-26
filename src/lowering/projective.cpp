@@ -129,7 +129,7 @@ LoweredOp lower_warp_perspective(const GpuMat& src, const GpuMat& dst,
   const auto& source = op.images[0];
   const auto& destination = op.images[1];
   const auto destination_row_bytes =
-      std::int64_t{dst.width()} * dst.channels() * depth_size(dst.depth());
+      std::int64_t{dst.width()} * dst.channels() * static_cast<std::int64_t>(depth_size(dst.depth()));
   const bool bounded_destination = destination_row_bytes <= index_limit &&
       dst.height() - 1 <= (index_limit - destination_row_bytes) / dst.row_pitch();
   const bool vector_c4 = source.depth == Depth::k32F && source.channels == 4 &&
