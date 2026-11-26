@@ -17,10 +17,9 @@ CUDA 逐例基线覆盖已核对的共同支持范围。16F、C++ 掩码、原�
 缩放和其他位运算深度的本轮证据见功能矩阵。并行推进算子时按 PR 登记具体负责人。
 本轮逐例结果和环境见 [NVIDIA 验收](nvidia-validation.md)。
 
-AMD 与 Hygon 后端沿用上表算子的公开接口和数值标准。W7900D（gfx1100）
-与 BW1000（gfx936）有单卡公开 API 和 Python 正确性证据。BW1101
-（gfx938）有构建及离线 ABI 证据，设备验收仍为预览。按
-[HIP 验收](hip-validation.md) 的平台范围维护支持状态。
+AMD 与 Hygon 后端使用上表接口和数值标准。W7900D、BW1000、BW1101
+各自具备单卡 C++、Python 和安装证据。适用 SDK 与版本见
+[HIP 验收](hip-validation.md)。
 
 ## 后续批次
 

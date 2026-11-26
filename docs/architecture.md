@@ -156,10 +156,9 @@ data. The caller keeps all buffers, the stream and the Handle alive until the en
 
 ## Plugin boundary
 
-Plugins include `backends/backend.hpp` and nothing else from the tree. They
-receive operand layouts and params as plain data, so adding a field to a core
-struct is not an ABI break. A plugin that includes a core internal header has
-broken the contract.
+Plugins use the ABI in `backends/backend.hpp` and may share internal helpers
+in `backends/common`. They receive operand layouts and params as plain data
+and do not include core internal headers.
 
 ### Backends
 
@@ -173,7 +172,7 @@ broken the contract.
 | `thead` | `hggc.h` | `.hgbin` | 32 | Triton backend name is `PPU` |
 | `ascend` (unavailable) | `acl/acl.h`, `rt.h` | `.npubin` | 1 | preview source, excluded from C++ builds |
 
-Five of them share one implementation, `backends/common/driver_backend.hpp`:
+The module-based plugins share `backends/common/driver_backend.hpp`:
 their driver APIs have the CUDA shape (init, primary context, push/pop, load
 module from bytes, get function, launch with an argument array), so a plugin
 is just an `Api` struct naming its own calls. Ascend does not have that shape
@@ -182,6 +181,10 @@ buffer — so it implements the table itself and sets
 `appends_scratch_args = 0` in the preview code. This is a provisional ABI
 expectation and must be verified against the target CANN/FlagTree build before
 enabling Ascend.
+
+AMD and Hygon share the internal HIP driver and thread-local device binding.
+Their plugins resolve the SDK independently in separate build trees. Their
+backend names, providers, registries and published artifact paths are distinct.
 
 The plugin also reports the compile target (`cuda:90:32`, `hip:gfx936:64`,
 ...) and the Triton backend name, which is what lets the compiler process
