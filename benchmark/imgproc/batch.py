@@ -2,7 +2,6 @@ import argparse
 import ctypes as c
 from pathlib import Path
 from functools import lru_cache
-import importlib.util
 import json
 import os
 import statistics
@@ -14,6 +13,7 @@ import triton.testing
 
 from flagcv_codegen.triton_build import load_jit_function
 from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES
+import live_support as live
 
 run=Path(__file__).resolve().parent
 lib=c.CDLL(os.environ["FLAGCV_IMGP_FIRST_BRIDGE"])
@@ -34,14 +34,8 @@ parser.add_argument("--matrix", type=Path, required=True)
 parser.add_argument("--profile", choices=PROFILES, default="default")
 args = parser.parse_args()
 profile = PROFILES[args.profile]
-spec=importlib.util.spec_from_file_location(
-    "h20_nvidia_batch_provider", Path(os.environ["FLAGCV_DATA_DIR"])/"backends/nvidia/compiler.py")
-provider=importlib.util.module_from_spec(spec)
-spec.loader.exec_module(provider)
-provider.compile_kernel=lambda req,tuning,warps,grid:(tuning,warps,grid)
-
 stream=torch.cuda.Stream()
-native=cv2.cuda.wrapStream(stream.cuda_stream)
+native=None if live.HIP or live.VERIFY_ONLY else cv2.cuda.wrapStream(stream.cuda_stream)
 cv2.setNumThreads(1)
 
 def wrap(mat, channels):
@@ -59,7 +53,8 @@ def run_case(row):
     height,width=expected.shape[1:3]
     source=torch.empty((n,sh+3,sw+5,cn),dtype=torch.uint8,device="cuda")[:,1:sh+1,1:sw+1]
     source.copy_(torch.from_numpy(host))
-    dest=torch.empty((n,height+5,width+7,cn),dtype=torch.uint8,device="cuda")[:,2:height+2,2:width+2]
+    backing=torch.full((n,height+5,width+7,cn),91,dtype=torch.uint8,device="cuda")
+    dest=backing[:,2:height+2,2:width+2]
     other=torch.empty((n,height+5,width+7,cn),dtype=torch.uint8,device="cuda")[:,2:height+2,2:width+2]
     state=lib.prepare(0,sw,sh,dw,dh,0,cn,mode,-1,0,0,fx,fy)
     if not state:
@@ -76,8 +71,7 @@ def run_case(row):
         if not raw:
             raise RuntimeError(lib.last_message().decode())
         req=json.loads(raw)
-        req["from_platform_registry"]=False
-        tune,warps,dimensions=provider.compile(req)
+        tune,warps,dimensions=live.plan(req)
         params={x["name"]:x["value"] for x in req["params"]}
         grid=[]
         for d in dimensions:
@@ -102,6 +96,15 @@ def run_case(row):
         compiled = candidate()
         if not np.array_equal(dest.cpu().numpy(),expected):
             return dict(status="FLAGCV_CPU_DIFF")
+        guard = backing.cpu().numpy()
+        guard[:,2:height+2,2:width+2] = 91
+        if not np.all(guard == 91) or not np.array_equal(source.cpu().numpy(), host):
+            return dict(status="FLAGCV_GUARD_DIFF")
+        launch=dict(kernel=req["kernel"],grid=grid,tile=tune,hash=compiled.hash,source=req["source"],
+                    target=req["target"],code_sha256=live.artifact(compiled),num_warps=compiled.metadata.num_warps,
+                    num_stages=compiled.metadata.num_stages,enable_fp_fusion=compiled.metadata.enable_fp_fusion)
+        if live.HIP or live.VERIFY_ONLY:
+            return dict(flagcv_launches=1, **live.candidate_only(launch, candidate, profile, args.profile))
         views=[(wrap(source[i],cn),wrap(other[i],cn)) for i in range(n)]
         def baseline():
             for s,d in views:
@@ -133,9 +136,7 @@ def run_case(row):
         classification = "NATIVE_REFUSED" if diagnostic else "COMPARABLE" if native_delta == 0 else "SEMANTICS_DIFFER"
         return dict(classification=classification, pairs=pairs, flagcv_us=flag, opencv_cuda_us=native_us,
                     ratio=native_us/flag if classification=="COMPARABLE" else None,
-                    launch=dict(kernel=req["kernel"],grid=grid,tile=tune,hash=compiled.hash,
-                                num_warps=compiled.metadata.num_warps,num_stages=compiled.metadata.num_stages,
-                                enable_fp_fusion=compiled.metadata.enable_fp_fusion),
+                    launch=launch,
                     cuda_cpu_max_abs=native_delta,flagcv_launches=1,
                     opencv_cuda_launches=n if diagnostic is None else None,diagnostic=diagnostic)
     finally:

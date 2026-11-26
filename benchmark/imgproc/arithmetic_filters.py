@@ -17,6 +17,7 @@ import triton.testing
 
 from flagcv_codegen.triton_build import load_jit_function
 from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES
+import live_support as live
 
 run = Path(__file__).resolve().parent
 data = Path(os.environ["FLAGCV_DATA_DIR"]).resolve()
@@ -33,16 +34,12 @@ def load_module(name, path):
     return module
 
 point = load_module("installed_pointwise_checker", data / "tools/check_border_threshold.py")
-provider_path = data / "backends/nvidia/compiler.py"
-provider = load_module("nvidia_provider", provider_path)
-provider.compile_kernel = lambda request, tuning, warps, grid: (tuning, warps, grid)
-provider_sha = sha256(provider_path.read_bytes()).hexdigest()
 registry = {x["name"]: x for x in json.loads((data/"kernels/registry.json").read_text())["kernels"]}
 depths = (np.uint8, np.int8, np.uint16, np.int16, np.int32, np.float32, np.float64, np.float16)
 loader = lru_cache(maxsize=None)(load_jit_function)
 cv2.setNumThreads(1)
 stream = torch.cuda.Stream()
-native_stream = cv2.cuda.wrapStream(stream.cuda_stream)
+native_stream = None if live.HIP or live.VERIFY_ONLY else cv2.cuda.wrapStream(stream.cuda_stream)
 
 lib = c.CDLL(os.environ["FLAGCV_IMGP_SPATIAL_BRIDGE"])
 P, I, D, L = c.c_void_p, c.c_int, c.c_double, c.c_longlong
@@ -65,11 +62,11 @@ def wrap(array, cvdepth):
 
 def image(host, x=2, y=1):
     h, w, channels = host.shape
-    view = torch.empty((h + y + 2, w + x + 3, channels),
+    view = torch.full((h + y + 2, w + x + 3, channels), 91,
                        dtype=torch.from_numpy(host).dtype, device="cuda")
     target = view[y:y+h, x:x+w]
     target.copy_(torch.from_numpy(host))
-    return target
+    return target, view
 
 def evaluate_grid(plan, params):
     grid = []
@@ -104,18 +101,25 @@ def point_plan(call, large_u8_otsu):
             def capture(*args, **kwargs):
                 params = dict(zip(self.fn.arg_names, args))
                 params.update(kwargs)
-                values = [dict(name=key, value=int(value)) for key,value in params.items()
-                          if isinstance(value, (int, np.integer))]
-                first = args[0]
                 depths = {torch.uint8:"8U", torch.int8:"8S", torch.uint16:"16U", torch.int16:"16S",
                           torch.int32:"32S", torch.float16:"16F", torch.float32:"32F", torch.float64:"64F"}
-                request = dict(backend="nvidia", target="cuda:90:32", kernel=self.name,
-                               params=values, images=[dict(depth=depths[first.dtype])],
-                               from_platform_registry=False)
-                tune, warps, grid_spec = provider.compile(request)
+                args_and_constants = {name:params[name] for name in self.fn.arg_names if name in params}
+                values, images = [], []
+                for index, (name, value) in enumerate(args_and_constants.items()):
+                    if isinstance(value, torch.Tensor):
+                        images.append(dict(name=name.removesuffix("_ptr"), depth=depths[value.dtype],
+                                           channels=value.shape[2] if value.ndim == 3 else 1,
+                                           aligned16=(value.data_ptr() % 16 == 0)))
+                    elif isinstance(value, (int, np.integer)):
+                        values.append(dict(name=name, value=int(value),
+                                           type="constexpr" if index in self.fn.constexprs else "i32"))
+                request = live.request(self.name, values, images)
+                tune, warps, grid_spec = live.plan(request)
                 grid = evaluate_grid(grid_spec, params)
                 options = {**kwargs, **tune, "num_warps": warps, "num_stages": 1}
-                planned.append((self.fn[tuple(grid)], args, options, dict(grid=grid, tile=tune)))
+                if self.name == "threshold_select":
+                    options["enable_fp_fusion"] = False
+                planned.append((self.fn[tuple(grid)], args, options, dict(grid=grid, tile=tune, source=request["source"])))
             return capture
 
     try:
@@ -155,17 +159,15 @@ def spatial_call(operation, depth, source, target, ksize, edge, two_pass, weight
     pointers = {x.data_ptr():x for x in (source, target, table, inner) if x is not None}
     calls = []
     for request in requests:
-        entry = registry[request["kernel"]]
-        path = data / "kernels" / entry["source"]
-        request.update(backend="nvidia", target="cuda:90:32", from_platform_registry=False)
-        tile, warps, plan = provider.compile(request)
+        path = Path(request["source"])
+        tile, warps, plan = live.plan(request)
         params = {x["name"]: x["value"] for x in request["params"]}
         grid = evaluate_grid(plan, params)
-        launch = loader(str(path), entry["function"])[tuple(grid)]
+        launch = loader(str(path), request["function"])[tuple(grid)]
         arguments = {img["name"]+"_ptr": pointers[img["address"]] for img in request["images"]}
         arguments.update(params)
         arguments.update(tile, num_warps=warps, num_stages=1, enable_fp_fusion=False)
-        calls.append((launch, arguments, dict(grid=grid, tile=tile)))
+        calls.append((launch, arguments, dict(grid=grid, tile=tile, source=request["source"])))
     def run_spatial():
         return [(call(**arguments), plan) for call, arguments, plan in calls]
     return run_spatial
@@ -202,8 +204,8 @@ def run_case(identifier):
         host = rng.integers(max(limits.min,-127), min(limits.max+1,256), shape, dtype=dtype)
     else:
         host = rng.uniform(-2, 2, shape).astype(dtype)
-    source = image(host)
-    native_source = wrap(source, depth)
+    source, _ = image(host)
+    native_source = None if live.HIP or live.VERIFY_ONLY else wrap(source, depth)
     tolerance, expected_scalar, device_scalar, native_plan = 0, None, None, None
     automatic = 0
     if operation == "copy":
@@ -230,8 +232,9 @@ def run_case(identifier):
         out_shape = shape
     expected = expected.reshape(out_shape)
     initial = np.zeros(out_shape, dtype=dtype)
-    target, native_target = image(initial, 1, 3), image(initial, 1, 3)
-    native_output = wrap(native_target, depth)
+    target, backing = image(initial, 1, 3)
+    native_target, _ = image(initial, 1, 3)
+    native_output = None if live.HIP or live.VERIFY_ONLY else wrap(native_target, depth)
     if operation == "copy":
         candidate = point.border_call(source, target, pad, mode, value, dtype)
         def native():
@@ -255,13 +258,20 @@ def run_case(identifier):
     if operation in ("copy", "threshold"):
         candidate = point_plan(candidate, depth == 0 and automatic == cv2.THRESH_OTSU and h*w >= 1920*1080)
     compiled = candidate()
-    launch = [dict(name=k.metadata.name, hash=k.hash, stages=k.metadata.num_stages,
+    launch = [dict(name=k.metadata.name, hash=k.hash, code_sha256=live.artifact(k), target=live.identity()["target"], stages=k.metadata.num_stages,
                    fusion=k.metadata.enable_fp_fusion, warps=k.metadata.num_warps, **plan)
               for k,plan in compiled]
     actual_scalar = device_scalar[0].item() if device_scalar is not None else host_cutoff if operation=="threshold" else None
     if not check_pixels(target, expected, tolerance) or actual_scalar != expected_scalar:
         return dict(id=identifier, classification="CANDIDATE_CPU_DIFFER", launch=launch,
                     actual_scalar=actual_scalar, expected_scalar=expected_scalar)
+    guard = backing.cpu().numpy()
+    guard[3:3+out_shape[0],1:1+out_shape[1]] = 91
+    if not np.all(guard == 91) or not point.exact(source.cpu().numpy(), host):
+        raise RuntimeError("arithmetic or spatial source/guard changed")
+    if live.HIP or live.VERIFY_ONLY:
+        return dict(id=identifier, candidate_cutoff=actual_scalar, cpu_cutoff=expected_scalar,
+                    **live.candidate_only(launch, candidate, protocol, options.profile))
     category, available, error = "COMPARABLE", True, None
     try:
         scalar, native_result = native()
@@ -278,7 +288,7 @@ def run_case(identifier):
     pairs, event = samples(calls)
     ratio = event["opencv_cuda"]/event["flagcv"] if category=="COMPARABLE" and not automatic else None
     record = dict(id=identifier, classification=category, error=error, launch=launch,
-                  provider_sha256=provider_sha, samples=pairs, event_us=event, ratio=ratio)
+                  provider_sha256=live.plan_provider()[1], samples=pairs, event_us=event, ratio=ratio)
     if available and automatic:
         wall = []
         for _ in range(11):
@@ -294,7 +304,7 @@ rows = json.loads(options.matrix.read_text())
 print(json.dumps(dict(cases=len(rows), opencv=cv2.__file__, kernel_data=str(data),
                       copy_file=str(Path(point.copy_make_border.fn.__code__.co_filename).resolve()),
                       threshold_file=str(Path(point.threshold_apply.fn.__code__.co_filename).resolve()),
-                      profile=protocol._asdict(), provider=str(provider_path))), flush=True)
+                      profile=protocol._asdict(), provider=str(data / "backends" / live.BACKEND / "compiler.py"))), flush=True)
 with torch.cuda.stream(stream):
     for case in rows:
         try:

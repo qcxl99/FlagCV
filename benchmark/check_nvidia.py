@@ -200,6 +200,12 @@ def main():
     parser.add_argument("--imgproc-evidence", type=Path, help="root of the archived H20 runs")
     parser.add_argument("--imgproc-live", action="store_true", help="run installed Imgproc adapters")
     parser.add_argument("--prefix", type=Path, help="prefix of the installed live Imgproc package")
+    parser.add_argument("--backend", choices=("nvidia", "hip", "hygon"),
+                        help="validate the backend selected when the live package was built")
+    parser.add_argument("--verify-only", action="store_true", help="validate output without sampling")
+    parser.add_argument("--device-uuid", help="expected physical UUID for the live device")
+    parser.add_argument("--case-manifest", type=Path, help="additional frozen first-family cases")
+    parser.add_argument("--baseline-adapter", type=Path, help="optional Python comparator for the HIP live run")
     parser.add_argument("--case", action="append", help="run a selected live Imgproc case; repeatable")
     parser.add_argument("--require-imgproc-scope", action="append",
                         choices=("all", "first-batch", "geometry-small", "geometry-large", "arithmetic-filters", "resize-batch"))
@@ -215,14 +221,17 @@ def main():
             parser.error("--imgproc-live needs --prefix and its own case and profile arguments")
         from imgproc_live import run_live
         try:
-            run_live(args.prefix, args.case, args.python_benchmark_profile, args.summary)
+            run_live(args.prefix, args.case, args.python_benchmark_profile, args.summary,
+                     backend=args.backend, verify_only=args.verify_only, expected_uuid=args.device_uuid,
+                     case_manifest=args.case_manifest, baseline_adapter=args.baseline_adapter)
         except subprocess.CalledProcessError as error:
             parser.error(error.stderr or str(error))
         except (OSError, ValueError, KeyError, TypeError) as error:
             parser.error(str(error))
         return
-    if args.prefix or args.case:
-        parser.error("--prefix and --case need --imgproc-live")
+    if any((args.prefix, args.case, args.backend, args.verify_only, args.device_uuid,
+            args.case_manifest, args.baseline_adapter)):
+        parser.error("live package and device arguments need --imgproc-live")
     if args.require_imgproc_scope and not args.imgproc_evidence:
         parser.error("--require-imgproc-scope needs --imgproc-evidence")
     if args.imgproc_evidence is not None:

@@ -1,4 +1,5 @@
 #include <flagcv/flagcv.hpp>
+#include "live_bridge.hpp"
 #include "src/lowering/lowering.hpp"
 #include "src/runtime/runtime.hpp"
 
@@ -56,7 +57,11 @@ HostTableData table(const Prepared& p) {
 }
 
 void emit(std::ostringstream& s, const LoweredOp& op) {
-  s<<"{\"kernel\":\""<<op.kernel<<"\",\"images\":[";
+  const auto resolved = resolve_kernel(FLAGCV_LIVE_BACKEND, op.kernel);
+  s<<"{\"backend\":\""<<FLAGCV_LIVE_BACKEND<<"\",\"target\":\""<<live::device().target
+   <<"\",\"kernel\":\""<<op.kernel<<"\",\"source\":\""<<resolved.source
+   <<"\",\"function\":\""<<resolved.function<<"\",\"from_platform_registry\":"
+   <<resolved.from_platform_registry<<",\"images\":[";
   bool first=true;
   for (const auto& image:op.images) {
     if (!first) s<<',';

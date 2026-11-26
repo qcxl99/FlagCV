@@ -1,4 +1,5 @@
 #include <flagcv/flagcv.hpp>
+#include "live_bridge.hpp"
 #include "src/lowering/lowering.hpp"
 #include "src/runtime/runtime.hpp"
 
@@ -79,16 +80,17 @@ static const char* describe_plan(void* raw, void* source, long long src_pitch,
       op=lower_resize(src,dst,*st.resize,ws,count,source_batch,destination_batch,batch);
     else if (st.operation==1)
       op=lower_warp_affine(src,dst,st.matrix,mode,st.border==5 ? Border::kTransparent :
-                            Border::kReplicate,{},false);
+                            st.border==1 ? Border::kReplicate : Border::kConstant,{},false);
     else
       op=lower_cvtcolor(src,dst,st.code,ws);
-    const auto resolved=resolve_kernel("nvidia",op.kernel);
+    const auto resolved=resolve_kernel(FLAGCV_LIVE_BACKEND,op.kernel);
 
     std::ostringstream s;
     s<<std::setprecision(std::numeric_limits<float>::max_digits10);
-    s<<"{\"backend\":\"nvidia\",\"target\":\"cuda:90:32\",\"kernel\":\""<<op.kernel
+    s<<"{\"backend\":\""<<FLAGCV_LIVE_BACKEND<<"\",\"target\":\""<<live::device().target
+     <<"\",\"kernel\":\""<<op.kernel
      <<"\",\"source\":\""<<resolved.source<<"\",\"function\":\""<<resolved.function
-     <<"\",\"images\":[";
+     <<"\",\"from_platform_registry\":"<<resolved.from_platform_registry<<",\"images\":[";
     bool first=true;
     for (const auto& image:op.images) {
       if (!first) s<<',';
@@ -129,4 +131,19 @@ extern "C" const char* describe_batch(void* raw, void* source, long long src_pit
                                       long long source_batch, long long destination_batch) {
   return describe_plan(raw, source, src_pitch, destination, dw, dh, dcn, dst_pitch, table,
                        count, source_batch, destination_batch, true);
+}
+
+extern "C" const char* device_identity() {
+  try {
+    const auto& device = live::device();
+    std::ostringstream out;
+    out << "{\"backend\":\"" << FLAGCV_LIVE_BACKEND << "\",\"target\":\"" << device.target
+        << "\",\"plugin_device_id\":\"" << device.key << "\",\"plugin\":" << std::quoted(device.plugin)
+        << ",\"plugin_abi\":" << device.abi << ",\"scratch_args\":" << device.scratch_arguments << '}';
+    answer = out.str();
+    return answer.c_str();
+  } catch (const std::exception& e) {
+    message = e.what();
+    return nullptr;
+  }
 }

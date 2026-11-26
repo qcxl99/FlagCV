@@ -28,3 +28,13 @@ constexpr auto cudaStreamDestroy = hipStreamDestroy;
 constexpr auto cudaStreamQuery = hipStreamQuery;
 constexpr auto cudaStreamSynchronize = hipStreamSynchronize;
 constexpr auto cudaLaunchHostFunc = hipLaunchHostFunc;
+
+// Used by the installed live benchmark fixtures.
+using cudaEvent_t = hipEvent_t;
+constexpr auto cudaEventCreate = hipEventCreate;
+constexpr auto cudaEventDestroy = hipEventDestroy;
+constexpr auto cudaEventRecord = hipEventRecord;
+constexpr auto cudaEventSynchronize = hipEventSynchronize;
+constexpr auto cudaEventElapsedTime = hipEventElapsedTime;
+constexpr auto cudaMemcpyDeviceToDevice = hipMemcpyDeviceToDevice;
+constexpr auto cudaMemcpy2DAsync = hipMemcpy2DAsync;

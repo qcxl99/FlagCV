@@ -13,6 +13,7 @@ import torch
 import triton.testing
 
 from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES
+import live_support as live
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--profile", choices=PROFILES, default="default")
@@ -23,23 +24,16 @@ profile = PROFILES[options.profile]
 spec = importlib.util.spec_from_file_location("geometry_test", options.test_source)
 geometry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(geometry)
-# Use the relocated NVIDIA provider, including any target-specific override.
+# Use the relocated provider, including target-specific overrides.
 @geometry.lru_cache(maxsize=None)
 def provider_config(interpolation, border, channels, layout):
-    path = Path(os.environ["FLAGCV_DATA_DIR"]) / "backends/nvidia/compiler.py"
-    spec = importlib.util.spec_from_file_location("imgproc_nvidia_provider", path)
-    provider = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(provider)
-    provider.compile_kernel = lambda request, tuning, warps, grid: (tuning, warps, grid)
-    props = torch.cuda.get_device_properties(0)
     args = {"INTER": 1 if interpolation == 3 else interpolation, "BORDER": border, "CN": channels}
     if layout >= 0:
         args["LAYOUT"] = layout
-    request = dict(backend="nvidia", target=f"cuda:{props.major}{props.minor}:32",
-                   kernel="warp_perspective" if layout < 0 else "remap",
-                   params=[dict(name=name, value=value, type="constexpr") for name, value in args.items()],
-                   images=[{"channels":channels}], from_platform_registry=False)
-    tuning, warps, _ = provider.compile(request)
+    request = live.request("warp_perspective" if layout < 0 else "remap",
+                           [dict(name=name, value=value, type="constexpr") for name, value in args.items()],
+                           [{"name":"src", "channels":channels}])
+    tuning, warps, _ = live.plan(request)
     return tuning["BLOCK"], warps, tuning["COL_GRID_LIMIT"]
 
 geometry.provider_config = provider_config
@@ -47,7 +41,7 @@ kernels = geometry.kernel_module()
 kernel_path = Path(kernels.__file__).resolve()
 kernel_sha = sha256(kernel_path.read_bytes()).hexdigest()
 stream = torch.cuda.Stream()
-native_stream = cv2.cuda.wrapStream(stream.cuda_stream)
+native_stream = None if live.HIP or live.VERIFY_ONLY else cv2.cuda.wrapStream(stream.cuda_stream)
 cv2.setNumThreads(1)
 
 def wrap(array):
@@ -61,11 +55,11 @@ def wrap(array):
 
 def make_image(host, y, x):
     rows, cols, channels = host.shape
-    view = torch.empty((rows + 2 * y + 1, cols + 2 * x + 3, channels),
+    view = torch.full((rows + 2 * y + 1, cols + 2 * x + 3, channels), 91,
                        dtype=torch.from_numpy(host).dtype, device="cuda")
     image = view[y:y+rows, x:x+cols]
     image.copy_(torch.from_numpy(host))
-    return image
+    return image, view
 
 def validate(actual, expected):
     geometry.output_check(actual.cpu().numpy(), expected)
@@ -87,9 +81,9 @@ def run(row):
     h, w = row["destination"]
     sh, sw = row["source"]
     host, initial = geometry.geometry_inputs((sh, sw, channels), (h, w, channels), depth, 294)
-    source = make_image(host, 1, 3)
-    target = make_image(initial, 2, 5)
-    native_target = make_image(initial, 2, 5)
+    source, _ = make_image(host, 1, 3)
+    target, backing = make_image(initial, 2, 5)
+    native_target, _ = make_image(initial, 2, 5)
     if layout < 0:
         matrix = tuple(map(float, row.get("matrix", geometry.GENERAL)))
         coefficients = matrix if flag else geometry.inverse_coefficients(matrix)
@@ -107,19 +101,25 @@ def run(row):
                 y_coord = y + .5
         maps, launch_layout = geometry.map_inputs(h, w, flag, layout, x_coord, y_coord)
     reference = geometry.cv_result(host, initial, inter, border, flag, matrix, maps)
-    gmaps = tuple(make_image(m[:, :, None] if m.ndim == 2 else m, 1, 3) for m in maps)
+    gmaps = tuple(make_image(m[:, :, None] if m.ndim == 2 else m, 1, 3)[0] for m in maps)
     candidate = geometry.native_candidate(
         kernels, source, target, inter, border, flag, coefficients=coefficients, maps=gmaps,
         layout=launch_layout, values=geometry.constants(host.dtype, geometry.VALUES))
     compiled = candidate()
     validate(target, reference)
+    guard = backing.cpu().numpy()
+    guard[2:2+h,5:5+w] = 91
+    if not np.all(guard == 91) or not np.array_equal(source.cpu().numpy(), host):
+        raise RuntimeError("geometry source or destination guard changed")
     block, warps, limit = geometry.provider_config(inter, border, channels, -1 if layout < 0 else launch_layout)
     tiles = triton.cdiv(w, block)
     launch = dict(path=str(kernel_path), sha256=kernel_sha, name=compiled.metadata.name,
-                  hash=compiled.hash, block=block, num_warps=warps,
+                  hash=compiled.hash, code_sha256=live.artifact(compiled), target=live.identity()["target"], block=block, num_warps=warps,
                   num_stages=compiled.metadata.num_stages,
                   enable_fp_fusion=compiled.metadata.enable_fp_fusion,
                   grid=[h, min(tiles, limit), triton.cdiv(tiles, limit)])
+    if live.HIP or live.VERIFY_ONLY:
+        return dict(id=row["id"], **live.candidate_only(launch, candidate, profile, options.profile))
     mode = (cv2.INTER_NEAREST, cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INTER_AREA)[inter]
     native_border = geometry.CV_BORDERS[border]
     src_cv, dst_cv = wrap(source), wrap(native_target)

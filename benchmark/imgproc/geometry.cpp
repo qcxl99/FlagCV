@@ -1,8 +1,11 @@
 #define main small_fixture_main
 #include "test_projective.cpp"
 #undef main
+#include "live_device.hpp"
+#ifndef FLAGCV_TEST_HIP
 #include <opencv2/core/cuda_stream_accessor.hpp>
 #include <opencv2/cudawarping.hpp>
+#endif
 #include <chrono>
 #include <functional>
 #include <iomanip>
@@ -10,6 +13,7 @@
 
 namespace {
 using Submit = std::function<void()>;
+#ifndef FLAGCV_TEST_HIP
 using PerfClock = std::chrono::steady_clock;
 using flagcv_test::cuda_check;
 
@@ -124,6 +128,7 @@ void benchmark(const Stream& stream, const Image& dst, const cv::Mat& reference,
   }
 }
 
+#endif
 
 struct Case {
   std::string id;
@@ -143,8 +148,10 @@ void measure_case(flagcv::Handle& handle, const flagcv_test::Stream& stream, con
   fill(src, dst);
   src.upload(stream.value);
   dst.upload(stream.value);
+#ifndef FLAGCV_TEST_HIP
   auto cuda_stream = cv::cuda::StreamAccessor::wrapStream(stream.value);
   const auto input = view_cuda(src);
+#endif
   cv::Mat ref = dst.pixels().clone();
   const auto mode = modes[item.interpolation];
   const auto border = borders[item.border];
@@ -158,13 +165,20 @@ void measure_case(flagcv::Handle& handle, const flagcv_test::Stream& stream, con
       flagcv::warpPerspective(handle, src.view(), dst.view(), item.matrix, mode.gpu,
                               border.gpu, value, item.flag, stream.value);
     };
+#ifndef FLAGCV_TEST_HIP
     const auto native = [&](cv::cuda::GpuMat& output) {
       cv::cuda::warpPerspective(input, output, transform, ref.size(), cpu_flags, border.cpu,
                                 cv_value, cuda_stream);
     };
+#endif
     candidate();
     check(src, dst, stream, ref);
-    benchmark(stream, dst, ref, item.id, item.border == 5, candidate, native);
+#ifdef FLAGCV_TEST_HIP
+    live::candidate_only(item.id,candidate,stream.value);
+#else
+    if (live::verify_only()) live::verified(item.id);
+    else benchmark(stream, dst, ref, item.id, item.border == 5, candidate, native);
+#endif
     return;
   }
 
@@ -193,20 +207,27 @@ void measure_case(flagcv::Handle& handle, const flagcv_test::Stream& stream, con
     flagcv::remap(handle,src.view(),dst.view(),first.view(),item.layout==0?flagcv::GpuMat{}:second.view(),
                   mode.gpu,border.gpu,value,item.flag,stream.value);
   };
+#ifndef FLAGCV_TEST_HIP
   const auto cuda_first=view_cuda(first), cuda_second=item.layout==0?cv::cuda::GpuMat{}:view_cuda(second);
   const auto native = [&](cv::cuda::GpuMat& output) {
     cv::cuda::remap(input,output,cuda_first,cuda_second,cpu_flags,border.cpu,cv_value,cuda_stream);
   };
+#endif
   candidate();
   check(src, dst, stream, ref);
-  benchmark(stream, dst, ref, item.id, item.border == 5, candidate, native);
+#ifdef FLAGCV_TEST_HIP
+  live::candidate_only(item.id,candidate,stream.value);
+#else
+  if (live::verify_only()) live::verified(item.id);
+  else benchmark(stream, dst, ref, item.id, item.border == 5, candidate, native);
+#endif
 }
 }
 
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
   cv::setNumThreads(1);
-  flagcv::Handle handle;
+  flagcv::Handle handle(FLAGCV_LIVE_BACKEND, 0);
   flagcv_test::Stream stream;
   int failures=0;
   bool found=false;

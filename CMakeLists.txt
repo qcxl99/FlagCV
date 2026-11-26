@@ -15,7 +15,7 @@ include(CTest)
 
 option(BUILD_SHARED_LIBS "Build the relocatable FlagCV shared runtime" ON)
 option(FLAGCV_BUILD_TESTS "Build FlagCV tests" ${BUILD_TESTING})
-option(FLAGCV_BENCHMARK_IMGPROC "Build relocatable live NVIDIA Imgproc benchmarks" OFF)
+option(FLAGCV_BENCHMARK_IMGPROC "Build relocatable live Imgproc benchmarks" OFF)
 if(FLAGCV_BENCHMARK_IMGPROC AND NOT FLAGCV_BUILD_TESTS)
   message(FATAL_ERROR "FLAGCV_BENCHMARK_IMGPROC needs the shared FlagCV test fixtures")
 endif()

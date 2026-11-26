@@ -1,7 +1,9 @@
 #include <flagcv/flagcv.hpp>
+#ifndef FLAGCV_TEST_HIP
 #include <opencv2/cudaarithm.hpp>
 #include <opencv2/cudafilters.hpp>
 #include <opencv2/core/cuda_stream_accessor.hpp>
+#endif
 #include <opencv2/imgproc.hpp>
 
 #include <chrono>
@@ -14,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "cuda_image.hpp"
+#include "live_device.hpp"
 
 namespace {
 using flagcv_test::Image;
@@ -34,11 +36,14 @@ const std::pair<int, flagcv::Border> borders[] = {
     {cv::BORDER_WRAP, flagcv::Border::kWrap},
 };
 
+#ifndef FLAGCV_TEST_HIP
 cv::cuda::GpuMat external(const Image& image) {
   auto view = image.view();
   return {view.height(), view.width(), image.host.type(), view.data(),
           static_cast<std::size_t>(view.row_pitch())};
 }
+
+#endif
 
 void initialize(Image& image, cv::RNG& rng) {
   cv::Mat buffer(image.host.size(), CV_MAKETYPE(CV_32F, image.host.channels()));
@@ -67,6 +72,21 @@ bool matches(const cv::Mat& actual, const cv::Mat& oracle, double tolerance) {
   return true;
 }
 
+void validate_candidate(const std::string& id, const Image& src, const Image& dst,
+                        const cv::Mat& expected, const NativeStream& stream, const Call& candidate,
+                        double tolerance, double scalar) {
+  const auto got_scalar = candidate();
+  auto received = dst.download(stream);
+  if ((!std::isnan(scalar) && got_scalar != scalar) || !matches(received(dst.roi), expected, tolerance))
+    throw std::runtime_error(id + ": CANDIDATE_CPU_DIFFER");
+  dst.pixels().copyTo(received(dst.roi));
+  if (!bytes_equal(received, dst.host))
+    throw std::runtime_error(id + ": destination guard modified");
+  if (!bytes_equal(src.download(stream), src.host))
+    throw std::runtime_error(id + ": source bytes modified");
+}
+
+#ifndef FLAGCV_TEST_HIP
 struct Events {
   cudaEvent_t start{}, end{};
   Events() { cuda_check(cudaEventCreate(&start)); cuda_check(cudaEventCreate(&end)); }
@@ -93,16 +113,12 @@ Times measure(const Call& work, const NativeStream& stream, const Events& events
   return out;
 }
 
-void timing(const std::string& id, const Image& dst, const Image& baseline,
-            const cv::Mat& expected, const NativeStream& stream, const Events& events,
+void timing(const std::string& id, const Image& src, const Image& dst, const Image& baseline,
+            const cv::Mat& expected, const NativeStream& stream, const Events* events,
             const Call& candidate, const Call& other, cv::cuda::GpuMat& output,
             double tolerance, double scalar = no_scalar, bool host_result = false) {
-  const auto got_scalar = candidate();
-  if ((!std::isnan(scalar) && got_scalar != scalar) ||
-      !matches(dst.download(stream)(dst.roi), expected, tolerance)) {
-    std::cout << id << ",CANDIDATE_CPU_DIFFER,,,,,\n";
-    return;
-  }
+  validate_candidate(id, src, dst, expected, stream, candidate, tolerance, scalar);
+  if (live::verify_only()) { live::verified(id); return; }
   std::string category = "COMPARABLE";
   bool native_admitted = true;
   const auto* pointer = output.data;
@@ -128,9 +144,9 @@ void timing(const std::string& id, const Image& dst, const Image& baseline,
   stream.wait();
   for (int i = 0; i < 11; ++i) {
     Times flag{}, native{};
-    if (native_admitted && i % 2) native = measure(other, stream, events, host_result);
-    flag = measure(candidate, stream, events, host_result);
-    if (native_admitted && i % 2 == 0) native = measure(other, stream, events, host_result);
+    if (native_admitted && i % 2) native = measure(other, stream, *events, host_result);
+    flag = measure(candidate, stream, *events, host_result);
+    if (native_admitted && i % 2 == 0) native = measure(other, stream, *events, host_result);
     std::cout << id << ',' << category << ',' << i << ',' << flag.wall << ',';
     if (!host_result) std::cout << flag.event;
     std::cout << ',';
@@ -140,6 +156,14 @@ void timing(const std::string& id, const Image& dst, const Image& baseline,
     std::cout << '\n';
   }
 }
+
+#else
+void timing(const std::string& id, const Image& src, const Image& dst, const cv::Mat& expected, const NativeStream& stream,
+            const Call& candidate, double tolerance, double scalar = no_scalar, bool host_result = false) {
+  validate_candidate(id, src, dst, expected, stream, candidate, tolerance, scalar);
+  live::candidate_only(id, candidate, stream.value, host_result);
+}
+#endif
 
 struct Table {
   DeviceMemory memory;
@@ -153,15 +177,21 @@ struct Table {
 struct Arguments {
   flagcv::Handle& handle;
   NativeStream& stream;
+#ifndef FLAGCV_TEST_HIP
   cv::cuda::Stream& native;
-  Events& events;
+  const Events* events;
+#endif
 };
 
 void copy_sample(Arguments ctx, int width, int height, int depth, int channels, int border) {
   constexpr flagcv::BorderExtents pad{3, 5, 7, 9};
   const int type = CV_MAKETYPE(depth, channels);
-  Image src(height, width, type, 2, 1, 5), dst(height + 8, width + 16, type, 1, 3, 4),
-      baseline(height + 8, width + 16, type, 1, 3, 4);
+  Image src(height, width, type, 2, 1, 5), dst(height + 8, width + 16, type, 1, 3, 4);
+  dst.host.setTo(cv::Scalar::all(91));
+  dst.upload(ctx.stream.value);
+#ifndef FLAGCV_TEST_HIP
+  Image baseline(height + 8, width + 16, type, 1, 3, 4);
+#endif
   cv::RNG rng(872);
   initialize(src, rng);
   src.upload(ctx.stream.value);
@@ -170,26 +200,38 @@ void copy_sample(Arguments ctx, int width, int height, int depth, int channels, 
   const cv::Scalar constant(2.5, 3.5, 11, 15);
   cv::copyMakeBorder(src.pixels(), expected, pad.top, pad.bottom, pad.left, pad.right,
                      cpu_border | cv::BORDER_ISOLATED, constant);
+#ifndef FLAGCV_TEST_HIP
   auto input = external(src), output = external(baseline);
+#endif
   const auto candidate = [&] {
     flagcv::copyMakeBorder(ctx.handle, src.view(), dst.view(), pad, flag_border,
                            {2.5, 3.5, 11, 15}, nullptr, ctx.stream.value);
     return no_scalar;
   };
+#ifndef FLAGCV_TEST_HIP
   const auto native = [&] {
     cv::cuda::copyMakeBorder(input, output, pad.top, pad.bottom, pad.left, pad.right,
                             cpu_border, constant, ctx.native);
     return no_scalar;
   };
+#endif
   const auto id = "copy-" + std::to_string(width) + "-" + std::to_string(height) + "-" +
                   std::to_string(type) + "-" + std::to_string(border);
-  timing(id, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, 0);
+#ifdef FLAGCV_TEST_HIP
+  timing(id, src, dst, expected, ctx.stream, candidate, 0);
+#else
+  timing(id, src, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, 0);
+#endif
 }
 
 void threshold_sample(Arguments ctx, int width, int height, int depth, int channels, int mode, int automatic) {
   const int type = CV_MAKETYPE(depth, channels);
-  Image src(height, width, type, 2, 1, 5), dst(height, width, type, 1, 3, 4),
-      baseline(height, width, type, 1, 3, 4);
+  Image src(height, width, type, 2, 1, 5), dst(height, width, type, 1, 3, 4);
+  dst.host.setTo(cv::Scalar::all(91));
+  dst.upload(ctx.stream.value);
+#ifndef FLAGCV_TEST_HIP
+  Image baseline(height, width, type, 1, 3, 4);
+#endif
   cv::RNG rng(876);
   initialize(src, rng);
   src.upload(ctx.stream.value);
@@ -198,7 +240,9 @@ void threshold_sample(Arguments ctx, int width, int height, int depth, int chann
   const double maxval = 201.5;
   cv::Mat expected;
   const double returned = cv::threshold(src.pixels(), expected, cutoff, maxval, mode | automatic);
+#ifndef FLAGCV_TEST_HIP
   auto input = external(src), output = external(baseline);
+#endif
   std::unique_ptr<DeviceMemory> scratch;
   std::size_t bytes = 0;
   if (automatic) {
@@ -212,30 +256,44 @@ void threshold_sample(Arguments ctx, int width, int height, int depth, int chann
                                       {scratch->ptr, bytes}, false, ctx.stream.value);
     return flagcv::threshold(ctx.handle, src.view(), dst.view(), cutoff, maxval, route, false, ctx.stream.value);
   };
+#ifndef FLAGCV_TEST_HIP
   const auto native = [&] {
     return cv::cuda::threshold(input, output, cutoff, maxval, mode | automatic, ctx.native);
   };
+#endif
   const auto id = "threshold-" + std::to_string(width) + "-" + std::to_string(height) + "-" +
                   std::to_string(type) + "-" + std::to_string(mode) + "-" + std::to_string(automatic);
-  timing(id, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, 0, returned, automatic != 0);
+#ifdef FLAGCV_TEST_HIP
+  timing(id, src, dst, expected, ctx.stream, candidate, 0, returned, automatic != 0);
+#else
+  timing(id, src, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, 0, returned, automatic != 0);
+#endif
 }
 
 void spatial_sample(Arguments ctx, int width, int height, int depth, int channels, int kernel,
                     int border, bool gaussian, bool two_pass) {
   const int type = CV_MAKETYPE(depth, channels);
-  Image src(height, width, type, 2, 1, 5), dst(height, width, type, 1, 3, 4),
-      baseline(height, width, type, 1, 3, 4);
+  Image src(height, width, type, 2, 1, 5), dst(height, width, type, 1, 3, 4);
+  dst.host.setTo(cv::Scalar::all(91));
+  dst.upload(ctx.stream.value);
+#ifndef FLAGCV_TEST_HIP
+  Image baseline(height, width, type, 1, 3, 4);
+#endif
   cv::RNG rng(879);
   initialize(src, rng);
   src.upload(ctx.stream.value);
   const auto dtype = flagcv_test::depth_for(depth);
   const auto [cpu_border, flag_border] = borders[border];
+#ifndef FLAGCV_TEST_HIP
   auto input = external(src), output = external(baseline);
+#endif
   const auto id = std::string(gaussian ? "gauss" : "filter") + "-" + std::to_string(width) + "-" +
                   std::to_string(height) + "-" + std::to_string(type) + "-" + std::to_string(kernel) +
                   "-" + std::to_string(border) + "-" + std::to_string(two_pass);
   const double tolerance = depth == CV_32F ? 2e-5 : depth == CV_64F ? 4e-12 : 0;
+#ifndef FLAGCV_TEST_HIP
   cv::Ptr<cv::cuda::Filter> native_plan;
+#endif
   cv::Mat expected;
   if (gaussian) {
     const flagcv::GaussianPlan plan({width, height}, dtype, {{kernel, kernel}, 0, 0, flag_border});
@@ -253,13 +311,19 @@ void spatial_sample(Arguments ctx, int width, int height, int depth, int channel
         flagcv::GaussianBlur(ctx.handle, src.view(), dst.view(), plan, table.view(), ctx.stream.value);
       return no_scalar;
     };
+#ifndef FLAGCV_TEST_HIP
     const auto native = [&] {
       if (!native_plan)
         native_plan = cv::cuda::createGaussianFilter(type, type, {kernel, kernel}, 0, 0, cpu_border, cpu_border);
       native_plan->apply(input, output, ctx.native);
       return no_scalar;
     };
-    timing(id, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, tolerance);
+#endif
+#ifdef FLAGCV_TEST_HIP
+    timing(id, src, dst, expected, ctx.stream, candidate, tolerance);
+#else
+    timing(id, src, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, tolerance);
+#endif
   } else {
     cv::Mat coefficients(kernel, kernel, CV_64F);
     rng.fill(coefficients, cv::RNG::UNIFORM, -.3, .3);
@@ -271,13 +335,19 @@ void spatial_sample(Arguments ctx, int width, int height, int depth, int channel
       flagcv::filter2D(ctx.handle, src.view(), dst.view(), plan, table.view(), ctx.stream.value);
       return no_scalar;
     };
+#ifndef FLAGCV_TEST_HIP
     const auto native = [&] {
       if (!native_plan)
         native_plan = cv::cuda::createLinearFilter(type, type, coefficients, {-1, -1}, cpu_border);
       native_plan->apply(input, output, ctx.native);
       return no_scalar;
     };
-    timing(id, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, tolerance);
+#endif
+#ifdef FLAGCV_TEST_HIP
+    timing(id, src, dst, expected, ctx.stream, candidate, tolerance);
+#else
+    timing(id, src, dst, baseline, expected, ctx.stream, ctx.events, candidate, native, output, tolerance);
+#endif
   }
 }
 }  // namespace
@@ -285,11 +355,15 @@ void spatial_sample(Arguments ctx, int width, int height, int depth, int channel
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
   cv::setNumThreads(1);
-  flagcv::Handle handle;
+  flagcv::Handle handle(FLAGCV_LIVE_BACKEND, 0);
   NativeStream stream;
+#ifdef FLAGCV_TEST_HIP
+  Arguments ctx{handle, stream};
+#else
   auto native = cv::cuda::StreamAccessor::wrapStream(stream.value);
-  Events events;
-  Arguments ctx{handle, stream, native, events};
+  const auto events = live::verify_only() ? nullptr : std::make_unique<Events>();
+  Arguments ctx{handle, stream, native, events.get()};
+#endif
   std::cout << "case,classification,sample,flagcv_sync_wall_us,flagcv_event_us,native_sync_wall_us,native_event_us\n";
   const std::string id = argv[1];
   std::string kind;

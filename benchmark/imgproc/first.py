@@ -2,7 +2,6 @@
 import argparse
 import ctypes
 from hashlib import sha256
-import importlib.util
 import os
 from functools import lru_cache
 import json
@@ -14,9 +13,9 @@ import numpy as np
 import torch
 import triton.testing
 
-from flagcv_codegen.providers import compile_with_plan
 from flagcv_codegen.triton_build import load_jit_function
 from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES
+import live_support as live
 
 run = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -25,13 +24,6 @@ parser.add_argument("--matrix", type=Path, required=True)
 args = parser.parse_args()
 profile = PROFILES[args.profile]
 rows = json.loads(args.matrix.read_text())
-
-provider_path=Path(os.environ["FLAGCV_DATA_DIR"]) / "backends/nvidia/compiler.py"
-provider_spec=importlib.util.spec_from_file_location("selected_flagcv_nvidia",provider_path)
-provider=importlib.util.module_from_spec(provider_spec)
-provider_spec.loader.exec_module(provider)
-provider.compile_kernel=lambda req, tuning, warps, grid: (tuning, warps, grid)
-
 
 lib=ctypes.CDLL(os.environ["FLAGCV_IMGP_FIRST_BRIDGE"])
 P=ctypes.c_void_p
@@ -94,7 +86,7 @@ def compare(row, input, actual, ref):
 
 cv2.setNumThreads(1)
 stream=torch.cuda.Stream()
-native=cv2.cuda.wrapStream(stream.cuda_stream)
+native=None if live.HIP or live.VERIFY_ONLY else cv2.cuda.wrapStream(stream.cuda_stream)
 nulls={name:torch.empty(0,dtype=dtype,device="cuda") for name,dtype in torch_for.items()}
 table_cache={}
 
@@ -105,17 +97,26 @@ def run_case(row):
     cn,mode,code,geom,border=(row[k] for k in ("channels","mode","code","geometry","border"))
     fx,fy=row["fx"],row["fy"]
     dep=row["depth"]
-    a=np.empty(src_shape(sh,sw,cn),dtype=numpy_for[dep])
-    hi=256 if dep=="8U" else 65536 if dep=="16U" else 2
-    cv2.setRNGSeed(421)
-    cv2.randu(a, ((-2 if dep=="32F" else 0),)*4, (hi,)*4)
+    shape = src_shape(sh,sw,cn)
+    path = os.environ.get("FLAGCV_IMGP_INPUT")
+    if path:
+        a = np.fromfile(path, dtype=numpy_for[dep]).reshape(shape)
+    else:
+        a = np.empty(shape,dtype=numpy_for[dep])
+        hi=256 if dep=="8U" else 65536 if dep=="16U" else 2
+        cv2.setRNGSeed(421)
+        cv2.randu(a, ((-2 if dep=="32F" else 0),)*4, (hi,)*4)
     transform=np.array(matrices[geom],np.float64).reshape(2,3)
     if op==0:
         reference=cv2.resize(a,(dw,dh),fx=fx,fy=fy,interpolation=mode)
     elif op==1:
         w=dw if mode==cv2.INTER_CUBIC else (dw+255)//128*128
         gold=np.empty(src_shape(dh,w,cn),dtype=a.dtype)
-        gold[...]=(19,23,33,18)[:cn] if cn>1 else 19
+        background = os.environ.get("FLAGCV_IMGP_BACKGROUND")
+        gold[...] = 0 if background else (19,23,33,18)[:cn] if cn>1 else 19
+        if background == "input_pixels":
+            gold[:,:dw] = a
+        initial = gold[:,:dw].copy()
         cv2.warpAffine(a,transform,(w,dh),gold,mode,border)
         reference=gold[:,:dw]
     else:
@@ -126,11 +127,11 @@ def run_case(row):
         raise RuntimeError(lib.last_message().decode())
     try:
         b=torch.from_numpy(a).to("cuda")
-        actual=torch.empty(reference.shape,dtype=torch_for[dep],device="cuda")
-        if op==1:
-            actual.copy_(torch.as_tensor((19,23,33,18)[:cn] if cn>1 else 19,
-                                          device="cuda",dtype=actual.dtype).expand(actual.shape))
-        baseline_dst=torch.empty_like(actual)
+        h, w = reference.shape[:2]
+        backing = torch.full((h+2, w+6, *reference.shape[2:]), 91, dtype=torch_for[dep], device="cuda")
+        actual = live.first_output_roi(backing, reference.shape)
+        if op == 1:
+            actual.copy_(torch.from_numpy(initial))
         bytes_=lib.host_bytes(state)
         addr=lib.host_data(state) if bytes_ else 0
         storage=None
@@ -150,8 +151,7 @@ def run_case(row):
         if not desc:
             raise RuntimeError(lib.last_message().decode())
         req=json.loads(desc)
-        req["from_platform_registry"]="/backends/nvidia/" in req["source"]
-        tuning, num_warps, dimensions=provider.compile(req)
+        tuning, num_warps, dimensions=live.plan(req)
         params={item["name"]:item["value"] for item in req["params"]}
         dims=[]
         for d in dimensions:
@@ -184,11 +184,33 @@ def run_case(row):
         launch=dict(kernel=req["kernel"],function=compiled.metadata.name,
                     hash=compiled.hash,grid=dims,tile=tuning,num_warps=compiled.metadata.num_warps,
                     num_stages=compiled.metadata.num_stages,enable_fp_fusion=compiled.metadata.enable_fp_fusion,
-                    provider_sha256=sha256(provider_path.read_bytes()).hexdigest(),
+                    provider_sha256=live.plan_provider()[1],code_sha256=live.artifact(compiled),
+                    source=req["source"],target=req["target"],
                     kernel_sha256=sha256(Path(req["source"]).read_bytes()).hexdigest())
         result=actual.cpu().numpy()
         if not compare(row,a,result,reference):
             return dict(status="FLAGCV_CPU_DIFF",max_abs=float(np.max(np.abs(result.astype(np.float64)-reference))))
+        guard = backing.cpu().numpy()
+        guard[1:1+h, 1:1+w] = 91
+        if not np.all(guard == 91) or not np.array_equal(b.cpu().numpy(), a):
+            return dict(status="FLAGCV_GUARD_DIFF")
+        if live.VERIFY_ONLY:
+            return live.candidate_only(launch, candidate, profile, args.profile)
+        baseline_backing = torch.full_like(backing, 91)
+        baseline_dst = live.matching_output_roi(actual, baseline_backing)
+        initial_baseline = (initial if op == 1 else
+                            np.full(reference.shape, np.nan, dtype=reference.dtype) if dep == "32F" else
+                            np.bitwise_not(reference))
+        baseline_dst.copy_(torch.from_numpy(initial_baseline))
+
+        def baseline_guard_ok():
+            guard = baseline_backing.cpu().numpy()
+            guard[1:1+h, 1:1+w] = 91
+            return bool(np.all(guard == 91))
+
+        layouts = dict(candidate=live.output_layout(actual), comparator=live.output_layout(baseline_dst))
+        if live.HIP:
+            return hip_baseline(row, a, b, baseline_dst, reference, launch, candidate, layouts, baseline_guard_ok)
         cv_src,cv_dst=wrap(b,dep),wrap(baseline_dst,dep)
         if op==0:
             baseline=lambda:cv2.cuda.resize(cv_src,(dw,dh),cv_dst,fx,fy,mode,native)
@@ -200,12 +222,16 @@ def run_case(row):
         try:
             returned = baseline()
             stream.synchronize()
-            if returned.cudaPtr() != baseline_dst.data_ptr():
+            if (returned.cudaPtr() != baseline_dst.data_ptr()
+                    or returned.step != baseline_dst.stride(0) * baseline_dst.element_size()
+                    or returned.size() != (w, h) or returned.type() != cv_dst.type()):
                 classification, diagnostic = "NATIVE_REFUSED", "output layout changed"
             else:
                 native_result = baseline_dst.cpu().numpy()
                 native_difference=float(np.max(np.abs(native_result.astype(np.float64)-reference)))
-                if not compare(row, a, native_result, reference):
+                if not baseline_guard_ok():
+                    classification, diagnostic = "NATIVE_REFUSED", "comparator output guard changed"
+                elif not compare(row, a, native_result, reference):
                     classification = "SEMANTICS_DIFFER"
         except cv2.error as error:
             classification, diagnostic = "NATIVE_REFUSED", str(error)
@@ -225,9 +251,51 @@ def run_case(row):
         native_us = scorer(p["opencv_cuda"] for p in pairs) if len(pair) == 2 else None
         return dict(classification=classification, profile=profile.name, flagcv_us=flagcv_us,
                     opencv_cuda_us=native_us, ratio=native_us/flagcv_us if classification=="COMPARABLE" else None,
-                    pairs=pairs, cuda_cpu_max_abs=native_difference, launch=launch, diagnostic=diagnostic)
+                    pairs=pairs, cuda_cpu_max_abs=native_difference, launch=launch, diagnostic=diagnostic, layouts=layouts)
     finally:
         lib.release(state)
+
+
+def hip_baseline(row, cpu, src, dst, reference, launch, candidate, layouts, guard_ok):
+    baseline_path = os.environ.get("FLAGCV_IMGP_BASELINE_ADAPTER")
+    if not baseline_path:
+        return live.candidate_only(launch, candidate, profile, args.profile)
+    path = Path(baseline_path).resolve()
+    comparer = dict(path=str(path), sha256=sha256(path.read_bytes()).hexdigest())
+
+    def refused(reason):
+        return dict(live.candidate_only(launch, candidate, profile, args.profile, reason),
+                    comparer=comparer, layouts=layouts)
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("selected_baseline", path)
+    adapter = importlib.util.module_from_spec(spec)
+    # The external provider is optional. Admit the actual result, per case, against the fixed CPU.
+    try:
+        spec.loader.exec_module(adapter)
+        baseline = adapter.prepare_first(row, src, dst, transform=np.array(matrices[row["geometry"]]).reshape(2, 3))
+        if baseline is None:
+            return refused("adapter has no equivalent case")
+        pointer = dst.data_ptr()
+        baseline()
+        stream.synchronize()
+        if dst.data_ptr() != pointer or live.output_layout(dst) != layouts["comparator"]:
+            return refused("comparator output layout changed")
+        if not guard_ok():
+            return refused("comparator output guard changed")
+        if not compare(row, cpu, dst.cpu().numpy(), reference):
+            return refused("baseline failed CPU check")
+    except (cv2.error, ValueError, RuntimeError, ImportError, OSError) as error:
+        return refused(f"baseline refused: {error}")
+    pairs, event = live.measure([("flagcv", candidate), ("baseline", baseline)], profile, args.profile)
+    dependencies = [dict(path=str(p), sha256=sha256(p.read_bytes()).hexdigest())
+                    for p in (Path(value).resolve() for value in getattr(adapter, "DEPENDENCIES", ()))]
+    return dict(classification="COMPARABLE", launch=launch, candidate_verified=True, pairs=pairs,
+                layouts=layouts, comparator_guard=True, comparator_cpu_verified=True,
+                comparer=dict(comparer, name=adapter.NAME,
+                              dependencies=dependencies, provenance=getattr(adapter, "PROVENANCE", None),
+                              torch_version=torch.__version__),
+                event_us=event, ratio=event["baseline"]/event["flagcv"])
 
 
 with torch.cuda.stream(stream):

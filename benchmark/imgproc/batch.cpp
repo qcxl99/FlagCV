@@ -10,10 +10,13 @@ const BatchCase batch_cases[] = {
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
   cv::setNumThreads(1);
-  Handle handle;
-  cv::cuda::Stream stream(cudaStreamNonBlocking);
-  const auto native=cv::cuda::StreamAccessor::getStream(stream);
-  Events events;
+  Handle handle(FLAGCV_LIVE_BACKEND, 0);
+  flagcv_test::Stream stream;
+  const auto native=stream.value;
+#ifndef FLAGCV_TEST_HIP
+  auto comparator_stream = cv::cuda::StreamAccessor::wrapStream(native);
+  const auto events = live::verify_only() ? nullptr : std::make_unique<Events>();
+#endif
   std::cout<<"id,status,sample,order,flagcv_wall_us,cuda_wall_us,flagcv_batch_wall_us,"
              "cuda_batch_wall_us,flagcv_event_us,cuda_event_us,cuda_cpu_max_abs\n";
   int errors=0;
@@ -36,46 +39,75 @@ int main(int argc, char** argv) {
       }
       const auto size=expected.front().size();
       const int output_rows=size.height+5;
-      cv::cuda::GpuMat src,flag_parent(output_rows*row.count,size.width+7,type),
-                       cuda_parent(output_rows*row.count,size.width+7,type);
+      live::Image src, flag_parent;
       src.upload(inputs,stream);
-      std::vector<cv::cuda::GpuMat> source,flag_out,cuda_out;
+      flag_parent.create({size.width+7, output_rows*row.count},type);
+      flag_parent.initialize(cv::Scalar::all(91),stream);
+#ifndef FLAGCV_TEST_HIP
+      live::Image cuda_parent;
+      std::vector<cv::cuda::GpuMat> source, cuda_out;
       for (int n=0;n<row.count;++n) {
-        source.push_back(src(cv::Rect(1,1+n*source_rows,row.sw,row.sh)));
-        cv::Rect rect(2,2+n*output_rows,size.width,size.height);
-        flag_out.push_back(flag_parent(rect));
-        cuda_out.push_back(cuda_parent(rect));
+        source.push_back(comparator_view(src.view(cv::Rect(1,1+n*source_rows,row.sw,row.sh)),type));
       }
+#endif
       const ResizePlan plan({row.sw,row.sh},Depth::k8U,row.channels,
                             {{row.dw,row.dh},row.fx,row.fy,static_cast<Interpolation>(row.mode)});
       auto blob=upload(plan.table_data(),plan.table_bytes(),stream);
-      const auto table=workspace(blob);
+      const auto table=blob.view();
       const Call actual=[&] {
-        resizeBatch(handle,view(source[0]),view(flag_out[0]),row.count,src.step*source_rows,
-                    flag_parent.step*output_rows,plan,table,native);
-      };
-      const Call baseline=[&] {
-        for (int n=0;n<row.count;++n)
-          cv::cuda::resize(source[n],cuda_out[n],{row.dw,row.dh},row.fx,row.fy,row.mode,stream);
+        resizeBatch(handle,src.view(cv::Rect(1,1,row.sw,row.sh)),
+                    flag_parent.view(cv::Rect(2,2,size.width,size.height)),row.count,
+                    src.view().row_pitch()*source_rows,flag_parent.view().row_pitch()*output_rows,plan,table,native);
       };
       actual();
-      stream.waitForCompletion();
+      auto output=flag_parent.download(stream);
       for (int n=0;n<row.count;++n) {
-        cv::Mat got;
-        flag_out[n].download(got);
-        if (cv::norm(got,expected[n],cv::NORM_INF)!=0)
+        cv::Rect rect(2,2+n*output_rows,size.width,size.height);
+        if (!flagcv_test::bytes_equal(output(rect),expected[n]))
           throw std::runtime_error("batch differs from direct CPU");
+        output(rect).setTo(cv::Scalar::all(91));
       }
+      if (cv::norm(output,cv::Mat(output.size(),type,cv::Scalar::all(91)),cv::NORM_INF)!=0)
+        throw std::runtime_error("batch destination gap changed");
+      if (!flagcv_test::bytes_equal(src.download(stream),inputs))
+        throw std::runtime_error("batch source changed");
+#ifdef FLAGCV_TEST_HIP
+      live::candidate_only(row.id,actual,native);
+#else
+      if (live::verify_only()) { live::verified(row.id); continue; }
+      cuda_parent.create({size.width+7,output_rows*row.count},type);
+      cuda_parent.initialize(cv::Scalar::all(91),stream);
+      for (int n=0; n<row.count; ++n) {
+        const cv::Rect roi(2,2+n*output_rows,size.width,size.height);
+        const auto view=cuda_parent.view(roi);
+        require_matched_output_layout(row.id,flag_parent.view(roi),flag_parent.offset(roi),
+                                      view,cuda_parent.offset(roi));
+        cuda_out.push_back(comparator_view(view,type));
+      }
+      const Call baseline=[&] {
+        for (int n=0;n<row.count;++n)
+          cv::cuda::resize(source[n],cuda_out[n],{row.dw,row.dh},row.fx,row.fy,row.mode,comparator_stream);
+      };
       double max_delta=0;
       bool native_valid=true;
       try {
         baseline();
-        stream.waitForCompletion();
+        stream.wait();
+        auto output=cuda_parent.download(stream);
         for (int n=0;n<row.count;++n) {
-          cv::Mat got;
-          cuda_out[n].download(got);
-          max_delta=std::max(max_delta,cv::norm(got,expected[n],cv::NORM_INF));
+          const cv::Rect roi(2,2+n*output_rows,size.width,size.height);
+          const auto native_view=cuda_parent.view(roi);
+          if (cuda_out[n].data!=native_view.data() || cuda_out[n].size()!=size ||
+              cuda_out[n].type()!=type || cuda_out[n].step!=static_cast<std::size_t>(native_view.row_pitch()))
+            throw cv::Exception(cv::Error::StsUnmatchedFormats,"native changed batch output layout",
+                                "paired-batch",__FILE__,__LINE__);
+          max_delta=std::max(max_delta,cv::norm(output(roi),expected[n],cv::NORM_INF));
+          output(roi).setTo(cv::Scalar::all(91));
         }
+        if (cv::norm(output,cv::Mat(output.size(),type,cv::Scalar::all(91)),cv::NORM_INF)!=0)
+          throw std::runtime_error("CUDA batch destination gap changed");
+        if (!flagcv_test::bytes_equal(src.download(stream),inputs))
+          throw std::runtime_error("batch source changed by CUDA comparator");
       } catch (const cv::Exception& e) {
         std::cout<<row.id<<",BASELINE_REFUSED,"<<std::quoted(e.err)<<'\n';
         native_valid=false;
@@ -84,19 +116,20 @@ int main(int argc, char** argv) {
         actual();
         if (native_valid) baseline();
       }
-      stream.waitForCompletion();
+      stream.wait();
       for (int i=0;i<kSamples;++i) {
         if (!native_valid) {
-          auto f=measure(actual,native,events);
+          auto f=measure(actual,native,*events);
           std::cout<<row.id<<",CANDIDATE_ONLY,"<<i<<",F,"<<f.wall<<",,"<<f.batch<<",,"<<f.event<<",,\n";
           continue;
         }
         Sample f,c;
-        if (i%2) { c=measure(baseline,native,events); f=measure(actual,native,events); }
-        else { f=measure(actual,native,events); c=measure(baseline,native,events); }
+        if (i%2) { c=measure(baseline,native,*events); f=measure(actual,native,*events); }
+        else { f=measure(actual,native,*events); c=measure(baseline,native,*events); }
         std::cout<<row.id<<(max_delta==0?",COMPARABLE,":",SEMANTICS_DIFFER,")<<i<<','<<(i%2?"CF":"FC")<<','<<f.wall<<','<<c.wall<<','
                  <<f.batch<<','<<c.batch<<','<<f.event<<','<<c.event<<','<<max_delta<<'\n';
       }
+#endif
       std::cout<<std::flush;
     } catch(const std::exception& e) {
       std::cout<<row.id<<",FLAGCV_FAIL,"<<std::quoted(e.what())<<'\n';
