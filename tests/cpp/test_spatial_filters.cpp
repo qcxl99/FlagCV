@@ -232,6 +232,69 @@ void filter_u16_saturation(Handle& handle, const Stream& upload, const Stream& u
   std::cout << "filter2D U16 saturation and rounding controls passed\n";
 }
 
+void filter_s18_reference(Handle& handle, const Stream& upload, const Stream& use) {
+  const auto run = [&](Image& src, Image& dst, const std::array<double, 81>& weights,
+                       double delta, Border edge, const cv::Mat& expected) {
+    const Filter2DPlan plan({9, 9}, weights.data(), depth_for(src.host.depth()),
+                            {Depth::k16U, {}, delta, edge});
+    execute(handle, upload, use, src, dst, plan.table(), expected,
+            [&](auto& h, const auto& s, const auto& d, auto table, auto stream) {
+              flagcv::filter2D(h, s, d, plan, table, stream);
+            });
+  };
+  Image u16(19, 37, CV_16UC1, 3, 1, 7), out(19, 37, CV_16UC1, 4, 2, 5);
+  u16.host.setTo(cv::Scalar::all(1));
+  out.host.setTo(cv::Scalar::all(17));
+  std::array<double, 81> weights{};
+  const std::array<double, 5> scales{0x1p120, 0x1p64, 1, -0x1p64, -0x1p120};
+  std::copy(scales.begin(), scales.end(), weights.begin() + 37);
+  const cv::Mat one(19, 37, CV_16UC1, cv::Scalar(1));
+  run(u16, out, weights, 0, Border::kReflect101, one);
+
+  // The fixed DFT loses the tiny signed residual at the midpoint.
+  weights.fill(0);
+  weights[40] = 0x1p31;
+  weights[41] = -0x1p31;
+  weights[42] = .5;
+  for (const double tail : {0x1p-80, 0., -0x1p-80}) {
+    weights[43] = tail;
+    const cv::Mat expected(19, 37, CV_16UC1, cv::Scalar(tail > 0 ? 1 : 0));
+    run(u16, out, weights, 0, Border::kReflect, expected);
+  }
+
+  Image half(3, 17, CV_16UC1, 3, 1, 7), half_dst(3, 17, CV_16UC1, 4, 2, 5);
+  half.host.setTo(cv::Scalar(65533));
+  half_dst.host.setTo(cv::Scalar(17));
+  weights.fill(0);
+  const std::array<double, 5> half_taps{4, 1. / 256, -4, -1. / 256, .5};
+  std::copy(half_taps.begin(), half_taps.end(), weights.begin() + 38);
+  const cv::Mat even(3, 17, CV_16UC1, cv::Scalar(32766));
+  run(half, half_dst, weights, 0, Border::kReflect, even);
+
+  Image u8(19, 37, CV_8UC3, 3, 1, 7), u8_dst(19, 37, CV_16UC3, 4, 2, 5);
+  initialize(u8, 731);
+  u8_dst.host.setTo(cv::Scalar::all(17));
+  auto input = u8.pixels();
+  input.col(1).copyTo(input.col(2));
+  weights.fill(0);
+  weights[40] = 0x1p18;
+  weights[41] = -0x1p18;
+  for (const auto border : {Border::kConstant, Border::kReflect}) {
+    cv::Mat expected(19, 37, CV_16UC3);
+    for (int y = 0; y < input.rows; ++y) {
+      const auto* source = input.ptr<std::uint8_t>(y);
+      auto* target = expected.ptr<std::uint16_t>(y);
+      for (int x = 0; x < input.cols * 3; ++x) {
+        const int q = x + 3 < input.cols * 3 ? source[x + 3] :
+                      border == Border::kReflect ? source[x] : 0;
+        target[x] = source[x] > q ? 65535 : source[x] < q ? 0 : 3;
+      }
+    }
+    run(u8, u8_dst, weights, 3, border, expected);
+  }
+  std::cout << "filter2D S18 reference controls passed\n";
+}
+
 void filter_three_tap_reference(Handle& handle, const Stream& upload, const Stream& use) {
   std::array<double, 81> weights{};
   weights[4 * 9 + 4] = 0.5;
@@ -502,6 +565,10 @@ int main(int argc, char** argv) {
       filter_u16_saturation(handle, upload, custom);
       return 0;
     }
+    if (argc == 2 && std::string_view(argv[1]) == "--filter2d-s18-reference") {
+      filter_s18_reference(handle, upload, custom);
+      return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--filter2d-three-tap-reference") {
       filter_three_tap_reference(handle, upload, custom);
       return 0;
@@ -605,6 +672,7 @@ int main(int argc, char** argv) {
     filter_half_weight_reference(handle, upload, custom);
     filter_u16_saturation(handle, upload, custom);
     filter_three_tap_reference(handle, upload, custom);
+    filter_s18_reference(handle, upload, custom);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
