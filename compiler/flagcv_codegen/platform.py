@@ -50,6 +50,14 @@ PLATFORM = {
         # Ascend binaries are registered with the runtime, not loaded as a module.
         "load_flags": 1,
     },
+    "amd": {
+        "triton_backend": "hip",
+        "binary": "hsaco",
+        "extension": "hsaco",
+        "warp": 32,
+        "tile": 2048,
+        "max_warps": 16,
+    },
     "hygon": {
         "triton_backend": "hip",
         "binary": "hsaco",
@@ -94,7 +102,7 @@ def platform(backend, target=None):
     if backend in HIP_TARGETS:
         if target not in HIP_TARGETS[backend]:
             raise ValueError(f"unsupported target {target!r} for {backend}")
-        return dict(PLATFORM["hygon"], warp=int(target.rsplit(":", 1)[1]))
+        return dict(PLATFORM[backend])
     entry = PLATFORM.get(backend)
     if entry is None:
         raise ValueError(f"no platform facts for backend {backend!r}")

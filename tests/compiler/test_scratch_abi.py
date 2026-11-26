@@ -3,8 +3,11 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "compiler"))
+from flagcv_codegen.platform import PLATFORM, platform  # noqa: E402
+from flagcv_codegen.providers import compile_with_plan  # noqa: E402
 from flagcv_codegen.scratch_abi import (  # noqa: E402
     require_qualified_compiler,
     validated_hip_scratch_args,
@@ -21,6 +24,48 @@ PTX = """
 )
 """
 ZERO = SimpleNamespace(name="sample", global_scratch_size=0, profile_scratch_size=0)
+
+
+class VendorPlatformFacts(unittest.TestCase):
+    def test_qualified_hip_targets_retain_facts_and_launch_plan(self):
+        for backend, target, warp in (
+            ("amd", "hip:gfx1100:32", 32),
+            ("hygon", "hip:gfx936:64", 64),
+            ("hygon", "hip:gfx938:64", 64),
+        ):
+            with self.subTest(target=target):
+                tuning, warps, grid, facts = compile_with_plan(dict(
+                    backend=backend, target=target, kernel="flip",
+                    images=[{"depth": "32F"}], params=[]))
+                self.assertEqual(facts, dict(triton_backend="hip", binary="hsaco",
+                                             extension="hsaco", warp=warp, tile=2048,
+                                             max_warps=16))
+                self.assertEqual(tuning, dict(BLOCK_X=512, BLOCK_Y=4, ROW_GRID_LIMIT=0))
+                self.assertEqual(warps, 4)
+                self.assertEqual(grid, [{"product": ["width", "CHANNELS"], "block": 512},
+                                        {"product": ["height"], "block": 4}, 1])
+
+    def test_vendor_tuning_isolated_in_both_directions(self):
+        self.assertIsNot(PLATFORM["amd"], PLATFORM["hygon"])
+        for first, second in ((("amd", "hip:gfx1100:32"), ("hygon", "hip:gfx936:64")),
+                              (("hygon", "hip:gfx938:64"), ("amd", "hip:gfx1100:32"))):
+            with self.subTest(edited=first[0]), patch.dict(PLATFORM[first[0]], tile=256, max_warps=2):
+                def plan(selection):
+                    backend, target = selection
+                    return compile_with_plan(dict(backend=backend, target=target, kernel="flip",
+                                                  images=[{"depth": "8U"}], params=[]))
+
+                edited, edited_warps, _, _ = plan(first)
+                untouched, untouched_warps, _, _ = plan(second)
+                self.assertEqual((edited["BLOCK_X"], edited_warps), (256, 2))
+                self.assertEqual((untouched["BLOCK_X"], untouched_warps), (2048, 4))
+
+    def test_cross_vendor_and_incorrect_wave_remain_unsupported(self):
+        for backend, target in (("amd", "hip:gfx936:64"), ("amd", "hip:gfx938:64"),
+                                ("hygon", "hip:gfx1100:32"), ("hygon", "hip:gfx936:32")):
+            with self.subTest(backend=backend, target=target):
+                with self.assertRaisesRegex(ValueError, "unsupported target"):
+                    platform(backend, target)
 
 
 class ScratchABI(unittest.TestCase):
