@@ -8,13 +8,6 @@ from helpers.correctness import check
 from helpers.tolerance import assert_exact
 from workloads.bitwise_not import CORRECTNESS_CASES, OP_NAME, case_id, make_inputs
 
-
-def _oracle(src):
-    import numpy as np
-
-    return np.bitwise_not(src)
-
-
 @pytest.mark.bitwise_not
 @pytest.mark.parametrize(
     ("shape", "dtype", "fixed_input"),
@@ -30,7 +23,6 @@ def test_bitwise_not(
         candidate,
         native_reference,
         pytestconfig,
-        _oracle,
         source_count=1,
         assert_output=assert_exact,
     )

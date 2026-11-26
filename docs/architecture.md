@@ -103,8 +103,8 @@ relative to libflagcv, else the source tree it was built from. Plugins are found
 
 ## Scratch ABI qualification
 
-The public C++ launch path currently qualifies NVIDIA with upstream Triton
-3.6.0. The compiler checks that both scratch allocation sizes are present and
+The NVIDIA provider checks the pinned FlagTree NVIDIA installation and its
+Triton 3.6.0 module path. The compiler checks that both scratch allocation sizes are present and
 zero. It also verifies the emitted PTX entry layout against the Runtime
 signature, including the two trailing 64-bit pointer parameters. The Runtime
 compares that count with the backend expectation before loading the binary.
@@ -123,14 +123,13 @@ emitted argument layout, scratch metadata semantics and an on-device public API
 test before enabling native launch. Ascend is excluded from C++ builds until
 its device lifecycle is qualified. Its source rejects Handle creation without
 initializing AscendCL, changing the active device or acquiring device resources.
-The standalone Python evaluation continues to use each compiler's own launcher.
-NVIDIA validation used CUDA sm90 on H20. Other versions and vendor variants
-need a qualification of their own.
+Internal Python evaluation compiles through the same provider, registry and
+specialization. Its launcher is supplied by the selected FlagTree distribution.
+Current NVIDIA offline and device status is recorded in [NVIDIA validation](nvidia-validation.md).
 
 The process-group cleanup follows the approach in
 [FlagDNN's compiler client](https://github.com/flagos-ai/FlagDNN/blob/a84bcc18a172fa01597d2fc171ce3af680f3074a/src/runtime/compiler_client.cpp#L671).
-The CUDA parameter order is from the
-[Triton 3.6.0 NVIDIA launcher](https://github.com/triton-lang/triton/blob/v3.6.0/third_party/nvidia/backend/driver.py).
+CUDA validation checks the PTX emitted by the installed FlagTree compiler.
 
 ## Ascend enablement
 
@@ -200,9 +199,8 @@ backend names, providers, registries and published artifact paths are distinct.
 
 The plugin also reports the compile target (`cuda:90:32`, `hip:gfx936:64`,
 ...) and the Triton backend name, which is what lets the compiler process
-build for a device it never touches. The platform facts the compiler needs —
-artifact format, Triton backend name, element-block and warp limits — are in
-`compiler/flagcv_codegen/platform.py`.
+build for a device it never touches. Each platform provider defines its artifact format, Triton backend name,
+element-block limits and artifact validation.
 
 The [operator inventory](operators.md) and [HIP validation](hip-validation.md)
 track which device/toolchain combinations have native evidence. Plugin

@@ -8,10 +8,13 @@ from statistics import median
 import pytest
 
 from conftest import emit
-from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES
+from helpers.baseline import comparison, external_result, read_json, summarize
+from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES, STATEFUL_PROTOCOL
+from workloads.core import python_cases
 
 
-def _measure_ms(candidate, args, *, warmup_ms=PROFILES["default"].warmup_ms):
+def _measure_ms(candidate, args, *, warmup_ms=PROFILES["default"].warmup_ms,
+                measurement_ms=MEASUREMENT_MS):
     import torch
 
     device = args[0].device
@@ -22,7 +25,7 @@ def _measure_ms(candidate, args, *, warmup_ms=PROFILES["default"].warmup_ms):
 
     with torch.get_device_module(device).device(device):
         return do_bench(lambda: candidate(*args), warmup=warmup_ms,
-                        rep=MEASUREMENT_MS, return_mode="median")
+                        rep=measurement_ms, return_mode="median")
 
 
 def _profile(config, case_id, candidate, build):
@@ -34,8 +37,10 @@ def _profile(config, case_id, candidate, build):
     device_module = torch.get_device_module(device) if device.type != "cpu" else None
     device_scope = device_module.device(device) if device_module else nullcontext()
     with device_scope:
+        warmup_candidate = candidate.prepare(*warmup_inputs) if hasattr(candidate, "prepare") else candidate
+        capture_candidate = candidate.prepare(*capture_inputs) if hasattr(candidate, "prepare") else candidate
         for _ in range(config.getoption("profile_warmup")):
-            candidate(*warmup_inputs)
+            warmup_candidate(*warmup_inputs)
         if device_module:
             device_module.synchronize()
         scope = config.hook.pytest_flaggems_profile_scope(
@@ -45,7 +50,7 @@ def _profile(config, case_id, candidate, build):
         before = config._evaluation.calls
         with scope if scope is not None else nullcontext():
             for _ in range(config.getoption("profile_iterations")):
-                candidate(*capture_inputs)
+                capture_candidate(*capture_inputs)
             if device_module:
                 device_module.synchronize()
         assert (
@@ -57,9 +62,7 @@ def _prepare_baseline(op_name, args, vendor):
     import torch
 
     if vendor != "nvidia":
-        pytest.fail(
-            "OpenCV CUDA baseline requires NVIDIA; use --baseline none for timing only"
-        )
+        raise ValueError("OpenCV CUDA baseline requires NVIDIA")
     from adapters.opencv_cuda import prepare
 
     dst_index = 1 if op_name in ("bitwise_not", "flip") else 2
@@ -103,86 +106,172 @@ def _validate_outputs(op_name, candidate, args, baseline, baseline_args):
         for function, operands in ((baseline, baseline_args), (candidate, args)):
             if function is None:
                 continue
-            poison_output(operands[dst_index], expected)
+            target = operands[dst_index]
+            if all(source.data_ptr() != target.data_ptr() for source in operands[:dst_index]):
+                poison_output(target, expected)
             assert (
                 function(*operands) is operands[dst_index]
             ), "Operator must return preallocated dst"
             compare(operands[dst_index], expected)
-            for source, snapshot in zip(sources, snapshots):
-                assert_bitwise_equal(source, snapshot)
+            for source, snapshot in zip(operands[:dst_index], snapshots):
+                if source.data_ptr() == target.data_ptr():
+                    source.copy_(snapshot)
+                else:
+                    assert_bitwise_equal(source, snapshot)
     if baseline is not None:
         compare(dst, baseline_args[dst_index])
 
 
-def _time_case(config, op_name, candidate, args):
-    protocol = PROFILES[config.getoption("benchmark_profile")]
-    baseline = None
-    baseline_args = None
-    if config.getoption("baseline") == "opencv-cuda":
-        baseline, baseline_args = _prepare_baseline(
-            op_name, args, config._flagcv_runtime.vendor
-        )
+def _mutated_inputs(op, args):
+    if not args or not hasattr(args[0], "data_ptr"):
+        return []
+    dst_index = 1 if op in ("bitwise_not", "flip") else 2
+    dst = args[dst_index]
+    return [source for source in args[:dst_index] if source.data_ptr() == dst.data_ptr()][:1]
+
+
+def _measure_stateful(run, args, mutated):
+    import torch
+
+    device = args[0].device
+    device_module = torch.get_device_module(device)
+    with device_module.device(device):
+        state = [(tensor, tensor.clone()) for tensor in mutated]
+
+        def restore():
+            for tensor, saved in state:
+                tensor.copy_(saved)
+
+        try:
+            for _ in range(5):
+                restore()
+                run(*args)
+            samples = []
+            start, stop = (device_module.Event(enable_timing=True) for _ in range(2))
+            for _ in range(25):
+                restore()
+                device_module.synchronize()
+                start.record()
+                run(*args)
+                stop.record()
+                stop.synchronize()
+                samples.append(start.elapsed_time(stop))
+            return median(samples), samples
+        finally:
+            restore()
+            device_module.synchronize()
+
+
+def _target(args, vendor):
+    if args[0].device.type != "cuda":
+        return None
+    import torch
+
+    name = torch.cuda.get_device_name(args[0].device)
+    return {"vendor": vendor, "chip": name.removeprefix("NVIDIA "), "name": name}
+
+
+def _time_case(config, op_name, candidate, args, row):
+    profile = PROFILES[config.getoption("benchmark_profile")]
+    warmup = config.getoption("warmup")
+    warmup = profile.warmup_ms if warmup is None else warmup
+    measurement = config.getoption("iter") or MEASUREMENT_MS
+    mutated = _mutated_inputs(op_name, args)
+    protocol = profile.name
+    if mutated:
+        protocol = STATEFUL_PROTOCOL
+    elif warmup != profile.warmup_ms or measurement != MEASUREMENT_MS:
+        protocol = f"triton-do-bench-no-graph-{warmup}ms-warmup-{measurement}ms-median"
+    native_mode = config.getoption("baseline")
+    vendor = getattr(getattr(config, "_flagcv_runtime", None), "vendor", "cpu")
+    baseline, baseline_args = None, None
+    native_status, native_reason = "unavailable", "no equivalent native comparator on this device"
+    if native_mode == "none":
+        native_status, native_reason = "disabled", "native timing disabled"
+    candidate_samples, baseline_samples, stateful_samples = [], [], []
+    _validate_outputs(op_name, candidate, args, None, None)
+    if hasattr(candidate, "prepare"):
+        candidate = candidate.prepare(*args)
+    baseline_version = None
+
+    def time(function, operands, inputs_to_restore):
+        calls = 0
+
+        def observed(*values):
+            nonlocal calls
+            calls += 1
+            return function(*values)
+
+        if inputs_to_restore:
+            latency, samples = _measure_stateful(observed, operands, inputs_to_restore)
+        else:
+            latency = _measure_ms(observed, operands, warmup_ms=warmup, measurement_ms=measurement)
+            samples = []
+        assert calls > 0, "Candidate timer did not execute the candidate"
+        assert math.isfinite(latency) and latency > 0
+        return latency, samples
+
+    def time_native():
+        nonlocal native_status, native_reason
+        if native_status == "passed":
+            try:
+                latency, _ = time(baseline, baseline_args, [])
+                baseline_samples.append(latency)
+            except Exception as error:
+                baseline_samples.clear()
+                native_status, native_reason = "failed", str(error)
+
     try:
-        _validate_outputs(op_name, candidate, args, baseline, baseline_args)
-        candidate_samples, baseline_samples = [], []
+        wants_native = native_mode == "opencv-cuda" or (native_mode == "auto" and vendor == "nvidia")
+        if wants_native and not mutated:
+            try:
+                baseline, baseline_args = _prepare_baseline(op_name, args, vendor)
+                _validate_outputs(op_name, None, args, baseline, baseline_args)
+                baseline_version = baseline.version
+                native_status, native_reason = "passed", None
+            except Exception as error:
+                native_status, native_reason = "failed", str(error)
+
         for sample in range(config.getoption("benchmark_samples")):
-            order = (False, True) if sample % 2 == 0 else (True, False)
-            for is_baseline in order:
-                if is_baseline and baseline is None:
-                    continue
-                function = baseline if is_baseline else candidate
-                operands = baseline_args if is_baseline else args
-                calls = 0
-
-                def observed(*values):
-                    nonlocal calls
-                    calls += 1
-                    return function(*values)
-
-                latency = _measure_ms(observed, operands, warmup_ms=protocol.warmup_ms)
-                assert calls > 0, "Candidate timer did not execute the candidate"
-                assert math.isfinite(latency) and latency > 0
-                (baseline_samples if is_baseline else candidate_samples).append(latency)
-        config._evaluation.timings += 1
-        latency = median(candidate_samples)
-        base_latency = median(baseline_samples) if baseline_samples else None
-        speedup = base_latency / latency if base_latency is not None else None
-        return {
-            "latency": latency,
-            "latency_base": base_latency,
-            "timing_protocol": protocol.name,
-            "warmup_ms": protocol.warmup_ms,
-            "measurement_ms": MEASUREMENT_MS,
-            "latency_samples_ms": candidate_samples,
-            "base_latency_ms": base_latency,
-            "base_latency_samples_ms": baseline_samples,
-            "base_raw_speedup": speedup,
-            "compared_speedup": speedup,
-            "baseline_source": "opencv_cuda_live" if baseline else None,
-            "baseline_version": baseline.version if baseline else None,
-            "base_miss_reason": None if baseline else "baseline disabled",
-            "accuracy_checked": True,
-        }
+            if sample % 2:
+                time_native()
+            latency, samples = time(candidate, args, mutated)
+            candidate_samples.append(latency)
+            if mutated:
+                stateful_samples.append(samples)
+            if sample % 2 == 0:
+                time_native()
     finally:
         if baseline is not None:
             baseline.close()
 
+    config._evaluation.timings += 1
+    latency = median(candidate_samples)
+    native_latency = median(baseline_samples) if baseline_samples else None
+    native_speedup = native_latency / latency if native_latency else None
+    base = config.getoption("base_data")
+    target_profile = config.getoption("target_profile")
+    observations = read_json(target_profile).get("cases", {}) if target_profile else {}
+    external = external_result(base, row, latency, protocol, _target(args, vendor) if base else None,
+                               observations.get(row["case_id"]))
+    return {
+        "latency": latency, "latency_base": native_latency, "speedup": native_speedup,
+        "latency_samples_ms": candidate_samples, "native_latency_samples_ms": baseline_samples,
+        "stateful_samples_ms": stateful_samples,
+        "timing_protocol": protocol, "warmup_ms": None if mutated else warmup,
+        "measurement_ms": None if mutated else measurement,
+        "native_status": native_status, "native_reason": native_reason,
+        "baseline_source": "opencv_cuda_live" if native_status == "passed" else None,
+        "baseline_version": baseline_version, "accuracy_checked": True,
+        "kernel_dispatch": getattr(candidate, "dispatch", None),
+        **external, **comparison(native_status, native_reason, native_speedup, external),
+    }
 
-def run(request, config, *, op_name, cases, make_inputs, describe):
-    """Run operator-owned cases using their input builder and metadata."""
-    cases = tuple(cases)
-    rows = []
-    for index, case in enumerate(cases):
-        dtype, shapes, params = describe(case)
-        rows.append(
-            {
-                "case_id": f"{request.node.nodeid}::core::{dtype}::{index}",
-                "ordinal": index,
-                "dtype": f"torch.{dtype}",
-                "shape": {name: list(shape) for name, shape in shapes.items()},
-                "params": params,
-            }
-        )
+
+def run(request, config, *, op_name, make_inputs):
+    """Run the operator's Core cases from the shared inventory."""
+    inventory = tuple(python_cases(op_name))
+    rows = [row for _, row in inventory]
     state = config._evaluation
     if config.getoption("list_cases"):
         emit(
@@ -201,19 +290,11 @@ def run(request, config, *, op_name, cases, make_inputs, describe):
         )
         return
 
-    selected = set(config.getoption("case_id"))
-    known = {row["case_id"] for row in rows}
-    if selected - known:
-        raise pytest.UsageError(
-            f"Unknown --case-id: {', '.join(sorted(selected - known))}"
-        )
+    selected = getattr(config, "_flagcv_selected_cases", set())
     candidate = request.getfixturevalue("candidate")
     device = config.getoption("device")
-    workloads = [
-        (case, row)
-        for case, row in zip(cases, rows)
-        if not selected or row["case_id"] in selected
-    ]
+    workloads = [(case, row) for case, row in inventory
+                 if not selected or row["case_id"] in selected]
     probe_start = len(state.records)
     by_dtype = {}
     for case, row in workloads:
@@ -227,12 +308,15 @@ def run(request, config, *, op_name, cases, make_inputs, describe):
             continue
 
         args = build()
-        timing = _time_case(config, op_name, candidate, args)
+        timing = _time_case(config, op_name, candidate, args, row)
         result = {
             "case_id": case_id,
+            "legacy_case_id": row["legacy_case_id"],
+            "config": row["config"],
             "shape_detail": row["shape"],
             "params": row["params"],
             "candidate_source": candidate.source,
+            "measurement_scope": "delivery" if candidate.source == "builtin" else "experiment",
             **timing,
         }
         by_dtype.setdefault(row["dtype"], []).append(result)
@@ -244,7 +328,8 @@ def run(request, config, *, op_name, cases, make_inputs, describe):
         return
 
     details = [
-        {"op_name": op_name, "dtype": dtype, "level": "core", "result": results}
+        {"op_name": op_name, "dtype": dtype, "level": "core", "result": results,
+         "summary": summarize(results)}
         for dtype, results in by_dtype.items()
     ]
     emit(

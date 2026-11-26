@@ -8,16 +8,6 @@ from helpers.correctness import check
 from helpers.tolerance import assert_exact, assert_relative_close
 from workloads.multiply import CORRECTNESS_CASES, OP_NAME, case_id, make_inputs
 
-
-def _oracle(a, b):
-    import numpy as np
-
-    if a.dtype == np.uint8:
-        values = np.multiply(a.astype(np.int32), b.astype(np.int32))
-        return values.clip(0, 255).astype(np.uint8)
-    return np.multiply(a, b)
-
-
 @pytest.mark.multiply
 @pytest.mark.parametrize(
     ("shape", "dtype", "fixed_inputs"),
@@ -34,7 +24,6 @@ def test_multiply(
         candidate,
         native_reference,
         pytestconfig,
-        _oracle,
         source_count=2,
         assert_output=assert_output,
     )

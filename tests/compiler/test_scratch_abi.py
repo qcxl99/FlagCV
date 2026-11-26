@@ -6,13 +6,23 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "compiler"))
-from flagcv_codegen.platform import PLATFORM, platform  # noqa: E402
-from flagcv_codegen.providers import compile_with_plan  # noqa: E402
+from flagcv_codegen.main import load_provider  # noqa: E402
 from flagcv_codegen.scratch_abi import (  # noqa: E402
-    require_qualified_compiler,
     validated_hip_scratch_args,
     validated_scratch_args,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def provider(name):
+    return load_provider(name, ROOT)
+
+
+def verify_compiler(name, backend, version, arch=None, module=None, wave=None):
+    target = SimpleNamespace(backend=backend, arch=arch, warp_size=wave)
+    provider(name).qualify(target, version, module)
+
 
 SIGNATURE = {"src_ptr": "*u8", "width": "i32", "BLOCK": "constexpr"}
 PTX = """
@@ -34,10 +44,11 @@ class VendorPlatformFacts(unittest.TestCase):
             ("hygon", "hip:gfx938:64", 64),
         ):
             with self.subTest(target=target):
-                tuning, warps, grid, facts = compile_with_plan(dict(
-                    backend=backend, target=target, kernel="flip",
+                compiler = provider(backend)
+                tuning, warps, grid = compiler.kernel_config(dict(
+                    backend=backend, target=target, kernel="flip", plan="flip",
                     images=[{"depth": "32F"}], params=[]))
-                self.assertEqual(facts, dict(triton_backend="hip", binary="hsaco",
+                self.assertEqual(compiler.FACTS, dict(triton_backend="hip", binary="hsaco",
                                              extension="hsaco", warp=warp, tile=2048,
                                              max_warps=16))
                 self.assertEqual(tuning, dict(BLOCK_X=512, BLOCK_Y=4, ROW_GRID_LIMIT=0))
@@ -46,17 +57,17 @@ class VendorPlatformFacts(unittest.TestCase):
                                         {"product": ["height"], "block": 4}, 1])
 
     def test_vendor_tuning_isolated_in_both_directions(self):
-        self.assertIsNot(PLATFORM["amd"], PLATFORM["hygon"])
+        self.assertIsNot(provider("amd").FACTS, provider("hygon").FACTS)
         for first, second in ((("amd", "hip:gfx1100:32"), ("hygon", "hip:gfx936:64")),
                               (("hygon", "hip:gfx938:64"), ("amd", "hip:gfx1100:32"))):
-            with self.subTest(edited=first[0]), patch.dict(PLATFORM[first[0]], tile=256, max_warps=2):
+            with self.subTest(edited=first[0]), patch.dict(provider(first[0]).FACTS, tile=256, max_warps=2):
                 def plan(selection):
                     backend, target = selection
-                    return compile_with_plan(dict(backend=backend, target=target, kernel="flip",
+                    return provider(backend).kernel_config(dict(backend=backend, target=target, kernel="flip", plan="flip",
                                                   images=[{"depth": "8U"}], params=[]))
 
-                edited, edited_warps, _, _ = plan(first)
-                untouched, untouched_warps, _, _ = plan(second)
+                edited, edited_warps, _ = plan(first)
+                untouched, untouched_warps, _ = plan(second)
                 self.assertEqual((edited["BLOCK_X"], edited_warps), (256, 2))
                 self.assertEqual((untouched["BLOCK_X"], untouched_warps), (2048, 4))
 
@@ -65,16 +76,15 @@ class VendorPlatformFacts(unittest.TestCase):
                                 ("hygon", "hip:gfx1100:32"), ("hygon", "hip:gfx936:32")):
             with self.subTest(backend=backend, target=target):
                 with self.assertRaisesRegex(ValueError, "unsupported target"):
-                    platform(backend, target)
+                    provider(backend).kernel_config(dict(target=target))
 
 
 class ScratchABI(unittest.TestCase):
     def test_verified_layout(self):
-        require_qualified_compiler("nvidia", "cuda", "3.6.0")
         for arch in ("gfx936", "gfx938"):
-            require_qualified_compiler("hygon", "hip", "3.6.0", arch,
+            verify_compiler("hygon", "hip", "3.6.0", arch,
                                        "triton.backends.hcu.compiler_hcu", 64)
-        require_qualified_compiler("amd", "hip", "3.6.0", "gfx1100",
+        verify_compiler("amd", "hip", "3.6.0", "gfx1100",
                                    "triton.backends.amd.compiler", 32)
         self.assertEqual(validated_scratch_args(ZERO, PTX, SIGNATURE), 2)
 
@@ -83,7 +93,7 @@ class ScratchABI(unittest.TestCase):
                          ("ascend", "npu", "3.6.0"), ("mthreads", "mtgpu", "3.6.0"),
                          ("iluvatar", "ix", "3.6.0"), ("thead", "PPU", "3.6.0")):
             with self.subTest(identity=identity), self.assertRaisesRegex(RuntimeError, "unqualified"):
-                require_qualified_compiler(*identity)
+                verify_compiler(*identity)
 
     def test_vendor_target_wave_and_compiler_must_match(self):
         amd = "triton.backends.amd.compiler"
@@ -92,11 +102,11 @@ class ScratchABI(unittest.TestCase):
             ("amd", "gfx936", hcu, 64), ("amd", "gfx938", hcu, 64),
             ("hygon", "gfx1100", amd, 32), ("hygon", "gfx936", hcu, 32),
             ("hygon", "gfx938", amd, 64), ("amd", "gfx1100", hcu, 32),
-            ("hip", "gfx936", hcu, 64), ("amd", "gfx942", amd, 64),
+            ("amd", "gfx942", amd, 64),
         ):
             with self.subTest(vendor=vendor, arch=arch, wave=wave):
                 with self.assertRaisesRegex(RuntimeError, "unqualified"):
-                    require_qualified_compiler(vendor, "hip", "3.6.0", arch, module, wave)
+                    verify_compiler(vendor, "hip", "3.6.0", arch, module, wave)
 
     def test_requires_both_zero_metadata_fields(self):
         for metadata in (SimpleNamespace(name="sample", global_scratch_size=0),

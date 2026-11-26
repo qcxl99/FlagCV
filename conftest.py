@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 from helpers.benchmark_protocol import PROFILES
 from reference import get_reference
 from runtime import resolve_device
+from workloads.core import python_cases
 
 _ROOT = Path(__file__).resolve().parent
 OPERATORS = tuple(
@@ -71,10 +73,16 @@ def pytest_addoption(parser):
     group.addoption("--record", choices=["none", "log", "json"], default="none")
     group.addoption("--output", type=Path)
     group.addoption(
-        "--baseline", choices=("opencv-cuda", "none"), default="opencv-cuda"
+        "--baseline", choices=("auto", "opencv-cuda", "none"), default="auto"
     )
     group.addoption("--benchmark-profile", choices=tuple(PROFILES), default="default",
-                    help="Python timing preset: default 100 ms/two pairs, long 1000 ms/three pairs")
+                    help="Python timing preset: default 25 ms, long 1000 ms warmup")
+    group.addoption("--warmup", type=int, help="Non-Graph warmup in milliseconds")
+    group.addoption("--iter", type=int, help="Non-Graph measurement budget in milliseconds")
+    group.addoption("--base-data", type=Path, help="External NVIDIA baseline collected by Optest")
+    group.addoption("--target-profile", type=Path, help="Measured target resource data by stable case ID")
+    group.addoption("--ref", choices=("cpu",), help="Use the OpenCV CPU reference")
+    group.addoption("--collect-marks", type=Path, help="Record collected operator marks for Optest")
     group.addoption("--benchmark-samples", type=int,
                     help="Override the timing preset's paired sample count")
     group.addoption("--reference", metavar="FILE:FUNCTION", help="Independent oracle")
@@ -85,6 +93,8 @@ def pytest_configure(config):
         return bool(config.getoption(name))
 
     modes = ("override", "builtin", "dummy_candidate", "ref_as_candidate", "list_cases")
+    if os.environ.get("FLAGCV_OPTEST") == "1" and not any(enabled(mode) for mode in modes):
+        config.option.builtin = True
     if sum(enabled(mode) for mode in modes) > 1:
         raise pytest.UsageError(
             "Choose one of --override, --builtin, --dummy-candidate, "
@@ -129,6 +139,9 @@ def pytest_configure(config):
         config.option.benchmark_samples = PROFILES[config.getoption("benchmark_profile")].samples
     if config.getoption("benchmark_samples") < 1:
         raise pytest.UsageError("--benchmark-samples must be positive")
+    warmup, measure = config.getoption("warmup"), config.getoption("iter")
+    if (warmup is not None and warmup < 0) or (measure is not None and measure <= 0):
+        raise pytest.UsageError("benchmark warmup must be nonnegative and --iter positive")
     for operator in OPERATORS:
         config.addinivalue_line("markers", f"{operator}: FlagCV operator evaluation")
     config._evaluation = Evaluation(config)
@@ -165,6 +178,14 @@ class Evaluation:
             return function(*args, **kwargs)
 
         invoke.source = source
+        if hasattr(function, "prepare"):
+            def prepare(*args):
+                prepared = function.prepare(*args)
+                observed = self.observe(prepared, source)
+                observed.dispatch = prepared.dispatch
+                return observed
+
+            invoke.prepare = prepare
         return invoke
 
     def probe(self):
@@ -370,7 +391,7 @@ class Evaluation:
     def pytest_sessionfinish(self, session, exitstatus):
         config = self.config
         if config.getoption("dummy_candidate"):
-            requested = set(config.getoption("case_id"))
+            requested = config._flagcv_selected_cases if config.getoption("case_id") else set()
             reached = {
                 record["case_id"]
                 for record in self.records
@@ -495,8 +516,9 @@ def candidate(request):
         request.node._reference_declared = True
         return state.observe(reference, "reference")
     if config.getoption("builtin"):
-        module = _ROOT / "kernels" / "common" / f"{operator}.py"
-        return state.observe(_load_callable(module, operator), "builtin")
+        from helpers.kernel_candidate import candidate_for
+
+        return state.observe(candidate_for(operator, runtime.vendor), "builtin")
     function = request.getfixturevalue("_override_candidates").get(operator)
     if function is None:
         raise pytest.UsageError(f"No --override supplied for {operator!r}")
@@ -522,6 +544,10 @@ def emit(config, data):
 
 
 def pytest_collection_modifyitems(config, items):
+    marks = config.getoption("collect_marks")
+    if marks:
+        write_json(marks, [{"marks": [op], "nodeid": item.nodeid}
+                           for item in items if (op := _test_operator(item))])
     dummy_operator = config.getoption("dummy_candidate")
     if dummy_operator:
         selected = [item for item in items if _test_operator(item) == dummy_operator]
@@ -530,8 +556,32 @@ def pytest_collection_modifyitems(config, items):
         selected = [item for item in items if benchmark_dir in item.path.parents]
         if not selected:
             raise pytest.UsageError("--profile-only requires a benchmark test")
+    elif config.getoption("case_id"):
+        selected = list(items)
     else:
         return
+    if config.getoption("case_id"):
+        case_ids = set(config.getoption("case_id"))
+        selected_cases = []
+        found = set()
+        canonical_ids = set()
+        for item in selected:
+            op = _test_operator(item)
+            if op is None or item.name != f"test_{op}_benchmark":
+                continue
+            matched = False
+            for _, row in python_cases(op):
+                matching = case_ids & {row["case_id"], row["legacy_case_id"]}
+                if matching:
+                    matched = True
+                    found.update(matching)
+                    canonical_ids.add(row["case_id"])
+            if matched:
+                selected_cases.append(item)
+        if found != case_ids:
+            raise pytest.UsageError(f"Unknown --case-id: {', '.join(sorted(case_ids - found))}")
+        config._flagcv_selected_cases = canonical_ids
+        selected = selected_cases
     deselected = [item for item in items if item not in selected]
     if deselected:
         items[:] = selected

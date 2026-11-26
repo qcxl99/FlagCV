@@ -1,9 +1,10 @@
 """Correctness and timing workloads for add."""
 
 from helpers.inputs import generate_tensor_input
+from workloads.core import ALIGNED_SMALL, FHD, UHD, VGA
 
 OP_NAME = "add"
-_TIMING_SHAPES = ((64, 64), (480, 640), (1080, 1920), (2160, 3840))
+_TIMING_SHAPES = (ALIGNED_SMALL, VGA, FHD, UHD)
 
 TIMING_CASES = tuple(
     (shape, dtype, None) for shape in _TIMING_SHAPES for dtype in ("float32", "uint8")

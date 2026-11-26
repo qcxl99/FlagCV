@@ -3,7 +3,7 @@
 import pytest
 
 from helpers.benchmark import run
-from workloads.bitwise_not import OP_NAME, TIMING_CASES, describe, make_inputs
+from workloads.bitwise_not import OP_NAME, make_inputs
 
 
 @pytest.mark.bitwise_not
@@ -12,7 +12,5 @@ def test_bitwise_not_benchmark(request, pytestconfig):
         request,
         pytestconfig,
         op_name=OP_NAME,
-        cases=TIMING_CASES,
         make_inputs=make_inputs,
-        describe=describe,
     )

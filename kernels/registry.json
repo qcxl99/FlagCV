@@ -4,52 +4,62 @@
     {
       "name": "flip",
       "source": "common/flip.py",
-      "function": "flip_kernel"
+      "function": "flip_kernel",
+      "plan": "flip"
     },
     {
       "name": "add",
       "source": "common/pointwise.py",
-      "function": "pointwise_kernel"
+      "function": "pointwise_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "subtract",
       "source": "common/pointwise.py",
-      "function": "pointwise_kernel"
+      "function": "pointwise_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "multiply",
       "source": "common/pointwise.py",
-      "function": "multiply_kernel"
+      "function": "multiply_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "bitwise_and",
       "source": "common/pointwise.py",
-      "function": "pointwise_kernel"
+      "function": "pointwise_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "bitwise_not",
       "source": "common/pointwise.py",
-      "function": "pointwise_kernel"
+      "function": "pointwise_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "add_masked",
       "source": "common/pointwise.py",
-      "function": "masked_pointwise_kernel"
+      "function": "masked_pointwise_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "subtract_masked",
       "source": "common/pointwise.py",
-      "function": "masked_pointwise_kernel"
+      "function": "masked_pointwise_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "bitwise_and_masked",
       "source": "common/pointwise.py",
-      "function": "masked_pointwise_kernel"
+      "function": "masked_pointwise_kernel",
+      "plan": "pointwise"
     },
     {
       "name": "bitwise_not_masked",
       "source": "common/pointwise.py",
-      "function": "masked_pointwise_kernel"
+      "function": "masked_pointwise_kernel",
+      "plan": "pointwise"
     }
   ]
 }

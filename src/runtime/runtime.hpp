@@ -45,6 +45,7 @@ struct ResolvedKernel {
   std::string source;
   std::string function;
   bool from_platform_registry = false;
+  std::string plan;
 };
 
 ResolvedKernel resolve_kernel(const std::string& backend,

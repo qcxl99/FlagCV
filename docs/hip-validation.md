@@ -56,3 +56,29 @@ workload 和原始结果。HIP 编译阶段检查输出的 ABI，规则见
 性能报告注明是否测 Python kernel 或公开 C++ API、计时和同步边界、
 原生比较器的语义及分配边界。同卡有 ATen 等价实现时可配对。不可比的
 路径分别标明原因。结果不能跨卡作为优化前后比值。
+
+## 当前整改与性能
+
+BW1000 在 DTK 26.04、`flagtree 0.7.0+hcu3.6`、GCC 13.3 环境通过
+双卡公开 API、外部 Stream、设备恢复、Python 正确性和迁移安装。
+BW1101 和 W7900D 的表格记录拆分版既有证据。当前候选对应验证待安排。
+
+```sh
+HIP_VISIBLE_DEVICES=0,1 python tools/check_merge.py --profile hygon --devices 2 \
+  --hip-dir "$DTK_HIP_CMAKE_DIR" --opencv-dir "$OPENCV_CMAKE_DIR" \
+  --output /tmp/flagcv-bw1000
+```
+
+BW1101 规格参考为表内类型 8，`NMZ_BW1101_CU64_144G`，64 CU、
+144G、基础频率 1.20 GHz、标注 boost 1.35 GHz。
+
+| 规格表项目 | Base / Peak |
+| --- | ---: |
+| Matrix（TFLOPS） | 315 / 354 |
+| i8gemm（表头 TFLOPS） | 629 / 708 |
+| fp8gemm（表头 TFLOPS） | 629 / 708 |
+| Vector hgemm | 20 / 21 |
+| Vector i8gemm | 39 / 43 |
+
+向量列未单列单位。实际瓶颈、精度和测量口径匹配时才使用测量系数。
+BW1000 与 W7900D 缺少匹配的换算证据时保留实测延迟。

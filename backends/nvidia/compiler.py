@@ -1,40 +1,31 @@
 # Copyright 2026 FlagOS Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""NVIDIA compiler provider.
-
-Kernel capability decisions live here, not in lowering: block sizes, shared
-memory limits and grid extents are platform properties, so lowering stays
-unchanged when a platform is added.
-
-Resolution order is this platform's kernels/registry.json, then the common
-kernels/registry.json; the runtime resolves it and names the chosen source in
-the request. Platform registration is EXCLUSIVE: once an operation is
-registered here, a constraint failure must be reported, not silently retried
-against the common kernel. So every layout constraint a platform kernel relies
-on gets checked here, before compiling, where the operand layout is fully
-known.
-"""
+"""Compiler provider for nvidia."""
 
 from flagcv_codegen.providers import compile_with_plan
-from flagcv_codegen.triton_build import compile_kernel, digest
+from flagcv_codegen.scratch_abi import raise_unqualified, validated_scratch_args
 
 PROVIDER = "nvidia"
+FACTS = {
+    "triton_backend": "cuda",
+    "binary": "cubin",
+    "extension": "cubin",
+    "warp": 32,
+    "tile": 1024,
+    "max_warps": 32,
+}
+FLAGTREE_RELEASE = "0.7.1.dev20261125"
 
 
 def identify():
-    """Digest of everything that can change generated code.
+    from flagcv_codegen.triton_build import digest
 
-    The Python interpreter, the Triton version, this file, the shared codegen
-    helpers and every kernel source reachable through both registries. The
-    runtime folds it into the cache key, so a kernel edit invalidates cached
-    artifacts.
-    """
     return digest(__file__, PROVIDER)
 
 
-def compile(request):
-    tuning, num_warps, grid, _ = compile_with_plan(request)
+def kernel_config(request):
+    tuning, num_warps, grid = compile_with_plan(request, FACTS)
     params = {param["name"]: param for param in request["params"]}
     if not request["from_platform_registry"]:
         if params.get("PACKED", {}).get("value"):
@@ -66,4 +57,26 @@ def compile(request):
             tuning["ROW_GRID_LIMIT"] = row_limit
             grid[1]["limit"] = row_limit
             grid[2] = {"product": ["height"], "block": tuning["BLOCK_Y"] * row_limit}
-    return compile_kernel(request, tuning, num_warps, grid)
+    return tuning, num_warps, grid
+
+
+def qualify(target, version, compiler_module):
+    from importlib import metadata
+    from pathlib import Path
+
+    import triton
+
+    try:
+        distribution = metadata.distribution("flagtree-nvidia")
+    except metadata.PackageNotFoundError:
+        raise_unqualified(PROVIDER, target, version, compiler_module)
+    if (target.backend != "cuda" or target.warp_size != 32
+            or version != "3.6.0" or compiler_module != "triton.backends.nvidia.compiler"
+            or distribution.version != FLAGTREE_RELEASE
+            or Path(triton.__file__).resolve()
+            != distribution.locate_file("triton/__init__.py").resolve()):
+        raise_unqualified(PROVIDER, target, version, compiler_module)
+
+
+def validate_scratch(compiled, signature):
+    return validated_scratch_args(compiled.metadata, compiled.asm.get("ptx"), signature)

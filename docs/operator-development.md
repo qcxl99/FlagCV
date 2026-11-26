@@ -1,7 +1,7 @@
 # 添加 Triton 算子及 C++ 调用链
 
-新增 Triton 算子时，除 Python 调用入口外，还需要接入 C++ 接口、lowering、
-kernel registry 和编译计划。已有 Python/Triton 实现也按这条路径补齐。
+新增 Triton 算子时接入 C++ 接口、lowering、kernel registry 和编译计划。
+内部 Python 评测使用同一实现。
 C++ 接口与内存、stream 的约定见 [C++ operator interfaces](cpp-operators.md)。
 
 ## 调用链与文件位置
@@ -107,9 +107,8 @@ Python wrapper 里的 `numel()`、shape 查询、grid 计算和 JIT 启动不能
 C++ 的编译入口。C++ registry 指向 `@triton.jit` 函数；把 wrapper 所需的元数据
 显式放进 lowering 参数，并把 grid 与调优参数交给编译计划。
 
-通用实现放在 `kernels/common/<family>.py`。保留原有 Python wrapper，以便 Python
-测试与使用方继续调用；如果原 kernel 只支持连续单通道输入，而 C++ 接口需要
-独立行距或多通道，应扩展 kernel 或提供单独的 kernel 入口。
+通用实现放在 `kernels/common/<family>.py`。Torch 输入准备和调用适配放在内部
+评测模块。扩展独立行距、多通道或 mask 时，覆盖 C++ 分派使用的变体。
 
 参数表必须严格按以下顺序排列：
 
@@ -144,15 +143,17 @@ def my_op_kernel(
 {
   "name": "my_op",
   "source": "common/my_op.py",
-  "function": "my_op_kernel"
+  "function": "my_op_kernel",
+  "plan": "my_op"
 }
 ```
 
 `name` 必须等于 `op.kernel`，`source` 相对该 registry 所在目录，`function`
 必须是可直接编译的 JIT 函数。
 
-然后在 `compiler/flagcv_codegen/providers.py` 添加 plan，并登记到 `PLANS`。
-例如对按行分块的逐元素 kernel：
+优先复用已有族的 plan。新族的 plan 登记到 `compiler/flagcv_codegen/providers.py`。
+如 JIT 入口导入共享源码，将路径放入条目的 `dependencies` 列表，使编译身份和
+安装包覆盖该依赖。以下为按行分块的 plan 示例。
 
 ```python
 def plan_my_op(request, facts):
@@ -175,9 +176,8 @@ PLANS["my_op"] = plan_my_op
 必须来自 lowering 参数。运行期尺寸值不会发送给编译进程，runtime 根据 plan
 返回的表达式计算实际 grid；不要在 provider 中读取请求里不存在的 width 数值。
 
-`backends/<platform>/compiler.py` 调用公共 plan 和 `compile_kernel()`；
-`identify()` 仅提供编译器身份摘要，用于缓存失效。平台能力检查放在
-`compile()` 或它调用的 plan 中，不能依赖无操作数信息的 `identify()`。
+`backends/<platform>/compiler.py` 定义设备目标、编译器资格、调优和 scratch
+ABI 规则。`identify()` 提供编译身份摘要，包含 registry、直接源码和共享依赖。
 
 默认先查 `backends/<platform>/kernels/registry.json`，再查公共 registry。
 平台注册具有排他性：命中后失败会直接报错，不会回退公共 kernel。
@@ -193,8 +193,8 @@ PLANS["my_op"] = plan_my_op
 C++ 精度测试通过公开 API 调用，在 `tests/cpp` 接入 OpenCV CPU 参考和
 对应平台的显存、拷贝及 stream。Python 测试使用该算子的 OpenCV CPU 参考。
 按 dtype、通道、尺寸、pitch、ROI、mask、边界和 stream 建矩阵，单独比较输入
-与输出 guard 字节。NVIDIA 以真实 OpenCV CUDA 调用建立 C++ 和 Python 的独立
-性能基线。提交时同步登记算子清单和逐用例性能证据。
+与输出 guard 字节。将性能用例登记到 `workloads/`，并更新 Optest 元数据和
+算子清单。按 [性能测试](benchmark.md) 提交逐用例证据。
 
 完整检查和复跑见 [NVIDIA 验收](nvidia-validation.md)，合入要求见
 [FlagCV 合入标准](../CONTRIBUTING.md)。
@@ -208,3 +208,22 @@ mask 表示“不写”，被排除的目标像素保留原值。使用单通道
 标量操作数可采用调用方提供的设备 buffer，让通道值在运行期加载；不要把每次
 调用的像素值编码进 constexpr。标量 buffer 的描述与索引规则需要明确实现，
 不能直接套用会要求图像尺寸相等的 array-array lowering。
+
+## 内部评测与候选注入
+
+使用算子的 `@pytest.mark.OP` 选择工作负载和 OpenCV CPU 参考。
+`--builtin` 使用交付编译和分派配置。使用 `--override OP:FILE[:FUNCTION]`
+注入候选，或使用 `--reference FILE:FUNCTION` 校验独立参考。旧 Case ID
+仍可用于选择用例，JSON 同时记录其稳定 ID。
+
+```sh
+python -m pytest benchmark -m add --list-cases --output /tmp/add-cases.json
+python -m pytest tests/test_add.py --device cpu --ref-as-candidate
+python -m pytest tests/test_add.py --override add:/path/to/candidate.py --device cuda:0
+python -m pytest benchmark -m add --profile-only --builtin --case-id "$CASE_ID" \
+  --profile-warmup 10 --profile-iterations 1
+```
+
+`--dummy-candidate add` 核对候选调用覆盖，并将结果写入
+`--dummy-report PATH`。Profiling 在预热后进入
+`pytest_flaggems_profile_scope(backend, case_id)`，插件可在该作用域采集。

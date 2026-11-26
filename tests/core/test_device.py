@@ -121,3 +121,11 @@ def test_removed_hip_vendor(monkeypatch):
     monkeypatch.setenv("GEMS_VENDOR", "hip")
     with pytest.raises(ValueError, match="removed; select amd or hygon"):
         runtime.resolve_device("cuda:0")
+
+
+def test_nvidia_selection_rejects_hip_runtime(monkeypatch):
+    monkeypatch.setenv("GEMS_VENDOR", "nvidia")
+    torch = SimpleNamespace(version=SimpleNamespace(hip="6"))
+    monkeypatch.setattr(runtime, "_torch_runtime", lambda: torch)
+    with pytest.raises(ValueError, match="does not match"):
+        runtime.resolve_device("cuda:1")

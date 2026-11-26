@@ -18,7 +18,7 @@ failure carries ``error`` instead of a result. Requests:
 
   {"id": 2, "op": "compile", "backend": "nvidia", "target": "cuda:90:32",
    "kernel": "flip", "source": "/abs/kernels/common/flip.py",
-   "function": "flip_kernel", "from_platform_registry": false,
+   "function": "flip_kernel", "plan": "flip", "from_platform_registry": false,
    "images": [{"name": "src", "depth": "8U", "channels": 3, "aligned16": true}, ...],
    "params": [{"name": "width", "type": "i32"},
               {"name": "CHANNELS", "type": "constexpr", "value": 3}, ...]}
@@ -33,7 +33,7 @@ remaining tiles, as the CUDA pitched kernels do for images with many rows.
 
 Runtime parameter values never reach this process: only their types do, so a
 new image size reuses the compiled artifact. Each platform provider lives in
-backends/<platform>/compiler.py and implements identify() and compile().
+backends/<platform>/compiler.py and supplies identity, tuning and ABI validation.
 """
 
 import importlib.util
@@ -51,15 +51,17 @@ def data_dir():
 _PROVIDERS = {}
 
 
-def load_provider(backend):
+def load_provider(backend, root=None):
     if backend == "hip":
         raise ValueError("the hip backend was removed; select amd or hygon")
-    provider = _PROVIDERS.get(backend)
+    root = data_dir() if root is None else Path(root).resolve()
+    key = (root, backend)
+    provider = _PROVIDERS.get(key)
     if provider is not None:
         return provider
     if not backend.replace("_", "").isalnum():
         raise ValueError(f"invalid backend name {backend!r}")
-    path = data_dir() / "backends" / backend / "compiler.py"
+    path = root / "backends" / backend / "compiler.py"
     if not path.is_file():
         raise FileNotFoundError(
             f"no compiler provider for backend {backend!r} at {path}"
@@ -67,7 +69,7 @@ def load_provider(backend):
     spec = importlib.util.spec_from_file_location(f"flagcv_provider_{backend}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    _PROVIDERS[backend] = module
+    _PROVIDERS[key] = module
     return module
 
 
@@ -77,7 +79,11 @@ def handle(request):
     if op == "identify":
         return {"identity": provider.identify()}
     if op == "compile":
-        return provider.compile(request)
+        if hasattr(provider, "compile"):
+            return provider.compile(request)
+        from flagcv_codegen.triton_build import compile_kernel
+
+        return compile_kernel(request, provider)
     raise ValueError(f"unknown request op {op!r}")
 
 

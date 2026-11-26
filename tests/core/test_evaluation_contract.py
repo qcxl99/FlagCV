@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from workloads.core import python_cases
+
 pytest_plugins = ["pytester"]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -318,7 +320,7 @@ def fake_timing(monkeypatch):
         if Path("missing.txt").exists():
             raise RuntimeError("OpenCV bridge unavailable")
         return Baseline(), (5,)
-    def measure_ms(function, args, *, warmup_ms):
+    def measure_ms(function, args, *, warmup_ms, measurement_ms):
         function(*args)
         return 0.008 if args == (5,) else 0.002
     monkeypatch.setattr(module, "make_inputs", lambda *a: (1,))
@@ -341,20 +343,17 @@ def fake_timing(monkeypatch):
         "--output",
         "result.json",
     )
-    if baseline == "missing":
-        result.assert_outcomes(failed=1)
-        result.stdout.fnmatch_lines(["*OpenCV bridge unavailable*"])
-        assert "add" not in json.loads((suite.path / "result.json").read_text())
-        return
     result.assert_outcomes(passed=1)
     rows = json.loads((suite.path / "result.json").read_text())["add"]["details"]
     (case,) = rows[0]["result"]
     assert case["latency"] == pytest.approx(0.002)
-    assert case["latency_samples_ms"] == [0.002] * 2
+    assert case["latency_samples_ms"] == [0.002] * 3
     if baseline == "live":
-        assert case["base_latency_ms"] == pytest.approx(0.008)
-        assert case["base_raw_speedup"] == pytest.approx(4.0)
-        assert case["compared_speedup"] == pytest.approx(4.0)
+        assert case["latency_base"] == pytest.approx(0.008)
+        assert case["speedup"] == pytest.approx(4.0)
+        assert case["formal_speedup"] == pytest.approx(4.0)
+        assert case["base_latency_ms"] is None
+        assert case["compared_speedup"] is None
         assert case["baseline_source"] == "opencv_cuda_live"
         assert case["baseline_version"] == "test-opencv"
         assert (suite.path / "closed.txt").read_text() == "closed"
@@ -363,6 +362,9 @@ def fake_timing(monkeypatch):
         assert case["base_raw_speedup"] is None
         assert case["compared_speedup"] is None
         assert case["baseline_source"] is None
+        if baseline == "missing":
+            assert case["formal_status"] == "failed"
+            assert case["native_reason"] == "OpenCV bridge unavailable"
 
 
 @pytest.mark.parametrize("candidate_fails", [False, True])
@@ -537,6 +539,8 @@ def test_dummy_benchmark_requires_all_selected_case_hits(
     assert report["status"] == (
         "PASSED" if exit_code == pytest.ExitCode.OK else "FAILED"
     )
+    legacy = {row["legacy_case_id"]: row["case_id"] for _, row in python_cases("add")}
+    selected = [legacy[alias] for alias in selected]
     assert [
         (row["case_id"], row["status"], row["calls"]) for row in report["records"]
     ] == [
@@ -563,9 +567,9 @@ def test_probe(candidate, pytestconfig, request):
 
 
 @pytest.mark.parametrize("args,warmup,samples", [
-    ([], 100, 2),
+    ([], 25, 3),
     (["--benchmark-profile", "long"], 1000, 3),
-    (["--benchmark-samples", "1"], 100, 1),
+    (["--benchmark-samples", "1"], 25, 1),
 ])
 def test_benchmark_profiles_reach_timer(suite, args, warmup, samples):
     suite.makepyfile(test_probe="""
@@ -576,13 +580,15 @@ def test_configuration(pytestconfig, monkeypatch):
     called = []
     monkeypatch.setattr(benchmark, "_validate_outputs", lambda *args: None)
 
-    def measure(function, operands, *, warmup_ms):
+    def measure(function, operands, *, warmup_ms, measurement_ms):
         called.append(warmup_ms)
         function(*operands)
         return 0.01
 
     monkeypatch.setattr(benchmark, "_measure_ms", measure)
-    report = benchmark._time_case(pytestconfig, "add", lambda: None, ())
+    from workloads.core import python_cases
+    _, row = next(python_cases("add"))
+    report = benchmark._time_case(pytestconfig, "add", lambda: None, (), row)
     assert called == [report["warmup_ms"]] * pytestconfig.option.benchmark_samples
     assert len(called) == EXPECTED_SAMPLES
     assert report["warmup_ms"] == EXPECTED_WARMUP

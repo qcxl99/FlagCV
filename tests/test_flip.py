@@ -8,15 +8,6 @@ from helpers.correctness import check
 from helpers.tolerance import assert_bitwise_equal
 from workloads.flip import CORRECTNESS_CASES, OP_NAME, case_id, make_inputs
 
-
-def _oracle(src, flip_code):
-    import numpy as np
-
-    axes = (0,) if flip_code == 0 else (1,) if flip_code > 0 else (0, 1)
-    # NumPy flip produces a view with negative strides.
-    return np.flip(src, axis=axes).copy()
-
-
 @pytest.mark.flip
 @pytest.mark.parametrize(
     ("shape", "dtype", "flip_code", "fixed_input"),
@@ -32,7 +23,6 @@ def test_flip(
         candidate,
         native_reference,
         pytestconfig,
-        _oracle,
         source_count=1,
         assert_output=assert_bitwise_equal,
     )
@@ -53,7 +43,6 @@ def test_flip_preserves_float_bits(candidate, native_reference, pytestconfig):
         candidate,
         native_reference,
         pytestconfig,
-        _oracle,
         source_count=1,
         assert_output=assert_bitwise_equal,
     )

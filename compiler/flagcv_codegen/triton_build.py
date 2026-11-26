@@ -16,15 +16,11 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 
 import triton
 from triton.backends.compiler import GPUTarget
 from triton.runtime.cache import triton_key
-
-from flagcv_codegen import platform as platforms
-from flagcv_codegen.scratch_abi import (
-    require_qualified_compiler, validated_hip_scratch_args, validated_scratch_args,
-)
 
 # Kernel pointer element types, keyed by the depth names the runtime sends.
 DEPTH_TO_TRITON = {
@@ -36,17 +32,6 @@ DEPTH_TO_TRITON = {
     "16F": "fp16",
     "32F": "fp32",
     "64F": "fp64",
-}
-
-DEPTH_SIZE = {
-    "8U": 1,
-    "8S": 1,
-    "16U": 2,
-    "16S": 2,
-    "32S": 4,
-    "16F": 2,
-    "32F": 4,
-    "64F": 8,
 }
 
 
@@ -69,9 +54,8 @@ def parse_target(target):
     return GPUTarget(backend, int(arch) if arch.isdigit() else arch, int(warp_size))
 
 
-def registry_sources(backend):
+def registry_sources(backend, root):
     """Every kernel source reachable through the platform and common registries."""
-    root = data_dir()
     sources = []
     for registry in (
         root / "backends" / backend / "kernels" / "registry.json",
@@ -82,18 +66,19 @@ def registry_sources(backend):
         sources.append(registry)
         for entry in json.loads(registry.read_text())["kernels"]:
             sources.append(registry.parent / entry["source"])
+            sources.extend(registry.parent / path for path in entry.get("dependencies", ()))
     return sources
 
 
-def digest(provider_file, backend):
+def digest(provider_file, backend, root=None):
     """Hash everything that can change generated code for this provider."""
     h = hashlib.sha256()
     h.update(sys.version.encode())
     h.update(triton_key().encode())
     files = [Path(provider_file)]
     files += sorted(Path(__file__).parent.glob("*.py"))
-    files += registry_sources(backend)
-    for path in files:
+    files += registry_sources(backend, data_dir() if root is None else root)
+    for path in dict.fromkeys(files):
         h.update(str(path).encode())
         h.update(path.read_bytes())
     return h.hexdigest()
@@ -101,7 +86,12 @@ def digest(provider_file, backend):
 
 def load_jit_function(source, function):
     path = Path(source).resolve()
-    module_name = "flagcv_kernel_" + hashlib.sha1(str(path).encode()).hexdigest()[:16]
+    package_name = "flagcv_kernel_" + hashlib.sha256(str(path.parent).encode()).hexdigest()[:16]
+    if package_name not in sys.modules:
+        package = ModuleType(package_name)
+        package.__path__ = [str(path.parent)]
+        sys.modules[package_name] = package
+    module_name = f"{package_name}.{path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -133,14 +123,10 @@ def _check_arguments(fn, request, tuning):
         )
 
 
-def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
-    """Compile the requested kernel and write its binary into the FlagCV cache.
-
-    `tuning` holds the provider's constexpr choices (block sizes); `grid` is the
-    launch-grid spec returned to the runtime, which evaluates it against the
-    runtime parameter values it never sent here.
-    """
-    facts = platforms.platform(request["backend"], request["target"])
+def compile_jit(request, provider, num_stages=1):
+    """Build one specialization used by both the runtime and evaluation."""
+    facts = provider.FACTS
+    tuning, num_warps, grid = provider.kernel_config(request)
     fn = load_jit_function(request["source"], request["function"])
     _check_arguments(fn, request, tuning)
 
@@ -169,8 +155,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
             f"{request['backend']} cannot compile target {request['target']!r}"
         )
     backend = triton.compiler.make_backend(target)
-    require_qualified_compiler(request["backend"], target.backend, triton.__version__,
-                               target.arch, type(backend).__module__, target.warp_size)
+    provider.qualify(target, triton.__version__, type(backend).__module__)
     options = backend.parse_options({"num_warps": num_warps, "num_stages": num_stages})
     # Deliberately no fn.create_binder(): it probes the active driver, which
     # imports torch and initialises a device. ASTSource compilation does not
@@ -180,11 +165,15 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     )
     compiled = triton.compile(source, target=target, options=options.__dict__)
 
+    scratch_args = provider.validate_scratch(compiled, signature)
+    return compiled, scratch_args, grid
+
+
+def compile_kernel(request, provider):
+    """Publish a compiled device image and its launch information."""
+    facts = provider.FACTS
+    compiled, scratch_args, grid = compile_jit(request, provider)
     metadata = compiled.metadata
-    if target.backend == "hip":
-        scratch_args = validated_hip_scratch_args(metadata, compiled.asm.get("llir"), signature)
-    else:
-        scratch_args = validated_scratch_args(metadata, compiled.asm.get("ptx"), signature)
 
     # The image Triton emits is platform specific: cubin on CUDA-shaped
     # vendors, hsaco/mubin/hgbin on the others, npubin on Ascend.
@@ -195,8 +184,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
             f"available: {sorted(compiled.asm)}"
         )
     artifact_dir = cache_dir() / "artifacts"
-    if target.backend == "hip":
-        artifact_dir /= request["backend"]
+    artifact_dir /= request["backend"]
     artifact_dir /= compiled.hash
     artifact = artifact_dir / f"{metadata.name}.{facts['extension']}"
     if not artifact.is_file():

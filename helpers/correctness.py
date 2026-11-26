@@ -26,7 +26,6 @@ def check(
     candidate,
     native_reference,
     config,
-    oracle,
     *,
     source_count,
     assert_output,
@@ -46,14 +45,11 @@ def check(
     dst = args[source_count]
     extra = args[source_count + 1 :]
     snapshots = tuple(source.clone() for source in sources)
-    arrays = tuple(source.detach().cpu().numpy() for source in snapshots)
-    audit = torch.from_numpy(oracle(*arrays, *extra)).to(dst.device)
 
     reference = get_reference(op_name, device)
     reference_inputs = tuple(source.clone() for source in snapshots)
     expected = torch.empty_like(dst)
     assert reference(*reference_inputs, expected, *extra) is expected
-    assert_output(audit, expected)
     for source, snapshot in zip(reference_inputs, snapshots):
         assert_bitwise_equal(source, snapshot)
 

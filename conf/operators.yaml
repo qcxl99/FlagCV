@@ -1,0 +1,37 @@
+ops:
+  - id: add
+    description: Add matching GPU images with unsigned saturation
+    for: [vision]
+    labels: [binary, pointwise]
+    kind: pointwise
+    stages: [{stable: "0.1.0"}]
+  - id: subtract
+    description: Subtract matching GPU images with unsigned saturation
+    for: [vision]
+    labels: [binary, pointwise]
+    kind: pointwise
+    stages: [{stable: "0.1.0"}]
+  - id: multiply
+    description: Multiply matching GPU images with optional floating scale
+    for: [vision]
+    labels: [binary, pointwise]
+    kind: pointwise
+    stages: [{stable: "0.1.0"}]
+  - id: bitwise_and
+    description: Compute bitwise AND between matching GPU images
+    for: [vision]
+    labels: [binary, pointwise]
+    kind: pointwise
+    stages: [{stable: "0.1.0"}]
+  - id: bitwise_not
+    description: Invert each bit of a GPU image
+    for: [vision]
+    labels: [unary, pointwise]
+    kind: pointwise
+    stages: [{stable: "0.1.0"}]
+  - id: flip
+    description: Reverse image rows, columns, or both on the GPU
+    for: [vision]
+    labels: [unary, spatial]
+    kind: spatial
+    stages: [{stable: "0.1.0"}]

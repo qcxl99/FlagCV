@@ -126,6 +126,10 @@ def resolve_device(device=None):
         raise ValueError(
             f"GEMS_VENDOR {vendor!r} uses {expected!r}, incompatible with --device {device!r}"
         )
+    if vendor == "nvidia" and os.environ.get("GEMS_VENDOR") is not None:
+        torch = _torch_runtime()
+        if getattr(getattr(torch, "version", None), "hip", None) or hasattr(torch, "__hcu_version__"):
+            raise ValueError("GEMS_VENDOR='nvidia' does not match the installed HIP Torch runtime")
     if vendor in ("amd", "hygon"):
         actual = _hip_vendor(_torch_runtime(), device)
         if actual != vendor:

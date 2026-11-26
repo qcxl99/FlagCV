@@ -6,21 +6,11 @@
 import re
 
 
-from flagcv_codegen.platform import HIP_TARGETS
-
-
-def require_qualified_compiler(backend, target, version, arch=None, compiler_module=None,
-                               warp=None):
-    # Qualify each vendor launcher and its actual target independently.
-    hip_compilers = {"amd": "triton.backends.amd.compiler",
-                     "hygon": "triton.backends.hcu.compiler_hcu"}
-    if (backend in HIP_TARGETS and f"{target}:{arch}:{warp}" in HIP_TARGETS[backend]
-            and version == "3.6.0" and hip_compilers[backend] == compiler_module):
-        return
-    if (backend, target, version) != ("nvidia", "cuda", "3.6.0"):
-        raise RuntimeError(
-            f"scratch ABI is unqualified for {backend}/{target}:{arch}:{warp} with {compiler_module} (Triton {version})"
-        )
+def raise_unqualified(backend, target, version, compiler_module):
+    raise RuntimeError(
+        f"scratch ABI is unqualified for {backend}/{target.backend}:{target.arch}:"
+        f"{target.warp_size} with {compiler_module} (Triton {version})"
+    )
 
 
 def validated_scratch_args(metadata, ptx, signature):

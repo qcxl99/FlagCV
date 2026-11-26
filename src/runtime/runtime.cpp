@@ -261,7 +261,8 @@ ResolvedKernel resolve_kernel(const std::string& backend,
       // Platform registration is exclusive: the first tier that names the
       // kernel wins, and its failures are never retried against the next.
       return ResolvedKernel{tier.dir + "/" + entry.at("source").as_string(),
-                            entry.at("function").as_string(), tier.platform};
+                            entry.at("function").as_string(), tier.platform,
+                            entry.has("plan") ? entry.at("plan").as_string() : ""};
     }
   }
   throw Error("flagcv: no kernel registered for '" + kernel + "' on backend '" +
@@ -311,6 +312,7 @@ void launch(Handle& handle, LoweredOp op, Stream stream) {
          << ",\"kernel\":" << json::quote(op.kernel)
          << ",\"source\":" << json::quote(resolved.source)
          << ",\"function\":" << json::quote(resolved.function)
+         << ",\"plan\":" << json::quote(resolved.plan)
          << ",\"from_platform_registry\":"
          << (resolved.from_platform_registry ? "true" : "false")
          << ",\"images\":[";

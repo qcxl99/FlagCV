@@ -1,15 +1,7 @@
 # Copyright 2026 FlagOS Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Launch plans shared by the platform providers.
-
-A provider owns the platform-specific decisions. Most of them are the same
-shape for every vendor — pick a tile, a warp count and a grid — and differ
-only in the limits the platform imposes, which live in platform.py. Keeping
-the shape here means a new operator is added once, not once per vendor.
-"""
-
-from flagcv_codegen.platform import platform
+"""Launch plans for the shared kernel families."""
 
 # Element sizes the kernels can be instantiated at.
 DEPTH_SIZE = {
@@ -38,7 +30,7 @@ def _grid_width(request):
     return ["width", "CHANNELS"]
 
 
-def plan_flip(request, facts=None):
+def plan_flip(request, facts):
     """Tile for flip: BLOCK_X channel values per program along a row.
 
     Each program moves BLOCK_Y x BLOCK_X values. Block sizes follow the
@@ -46,7 +38,6 @@ def plan_flip(request, facts=None):
     the element size, so wide elements do not blow past it, and are capped at
     a power of two for the vectorised axis.
     """
-    facts = facts or platform(request["backend"], request["target"])
     size = DEPTH_SIZE[request["images"][0]["depth"]]
     block_x = _power_of_two_at_most(max(facts["tile"] // size, 64))
     block_y = 4
@@ -62,7 +53,7 @@ def plan_flip(request, facts=None):
     return tuning, num_warps, grid
 
 
-def plan_pointwise(request, facts=None):
+def plan_pointwise(request, facts):
     tuning, warps, grid = plan_flip(request, facts)
     packed = any(
         param["name"] == "PACKED" and param["value"] for param in request["params"]
@@ -77,23 +68,15 @@ def plan_pointwise(request, facts=None):
     return tuning, warps, grid
 
 
-PLANS = dict.fromkeys(
-    (
-        "add", "subtract", "multiply", "bitwise_and", "bitwise_not",
-        "add_masked", "subtract_masked", "bitwise_and_masked", "bitwise_not_masked",
-    ),
-    plan_pointwise,
-)
-PLANS["flip"] = plan_flip
+PLANS = {"pointwise": plan_pointwise, "flip": plan_flip}
 
 
-def compile_with_plan(request):
-    """Dispatch a compile request to the kernel's plan for this platform."""
-    facts = platform(request["backend"], request["target"])
-    plan = PLANS.get(request["kernel"])
+def compile_with_plan(request, facts):
+    """Dispatch to the algorithm family declared by the selected registry."""
+    plan = PLANS.get(request.get("plan"))
     if plan is None:
         raise ValueError(
-            f"{request['backend']} has no launch plan for kernel {request['kernel']!r}"
+            f"{request['backend']} has no launch plan {request.get('plan')!r} "
+            f"for kernel {request['kernel']!r}"
         )
-    tuning, num_warps, grid = plan(request, facts)
-    return tuning, num_warps, grid, facts
+    return plan(request, facts)

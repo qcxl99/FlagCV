@@ -3,7 +3,7 @@
 import pytest
 
 from helpers.benchmark import run
-from workloads.subtract import OP_NAME, TIMING_CASES, describe, make_inputs
+from workloads.subtract import OP_NAME, make_inputs
 
 
 @pytest.mark.subtract
@@ -12,7 +12,5 @@ def test_subtract_benchmark(request, pytestconfig):
         request,
         pytestconfig,
         op_name=OP_NAME,
-        cases=TIMING_CASES,
         make_inputs=make_inputs,
-        describe=describe,
     )

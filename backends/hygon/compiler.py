@@ -1,19 +1,41 @@
 # Copyright 2026 FlagOS Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Hygon DTK compiler provider."""
+"""Compiler provider for hygon."""
 
 from flagcv_codegen.providers import compile_with_plan
-from flagcv_codegen.triton_build import compile_kernel, digest
+from flagcv_codegen.scratch_abi import raise_unqualified, validated_hip_scratch_args
 
 PROVIDER = "hygon"
+FACTS = {
+    "triton_backend": "hip",
+    "binary": "hsaco",
+    "extension": "hsaco",
+    "warp": 64,
+    "tile": 2048,
+    "max_warps": 16,
+}
+TARGETS = ('hip:gfx936:64', 'hip:gfx938:64')
 
 
 def identify():
-    """Digest of the interpreter, Triton, this file and every registered kernel."""
+    from flagcv_codegen.triton_build import digest
+
     return digest(__file__, PROVIDER)
 
 
-def compile(request):
-    tuning, num_warps, grid, _ = compile_with_plan(request)
-    return compile_kernel(request, tuning, num_warps, grid)
+def kernel_config(request):
+    if request["target"] not in TARGETS:
+        raise ValueError(f"unsupported target {request['target']!r} for {PROVIDER}")
+    tuning, num_warps, grid = compile_with_plan(request, FACTS)
+    return tuning, num_warps, grid
+
+
+def qualify(target, version, compiler_module):
+    name = f"{target.backend}:{target.arch}:{target.warp_size}"
+    if name not in TARGETS or version != "3.6.0" or compiler_module != "triton.backends.hcu.compiler_hcu":
+        raise_unqualified(PROVIDER, target, version, compiler_module)
+
+
+def validate_scratch(compiled, signature):
+    return validated_hip_scratch_args(compiled.metadata, compiled.asm.get("llir"), signature)

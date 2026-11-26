@@ -1,18 +1,11 @@
 """Correctness and timing workloads for subtract."""
 
 from helpers.inputs import generate_tensor_input
+from workloads.core import PYTHON_SIZES, SMALL_CORRECTNESS_SIZES
 
 OP_NAME = "subtract"
-_TIMING_SHAPES = (
-    (64, 64),
-    (61, 67),
-    (224, 224),
-    (257, 509),
-    (480, 640),
-    (720, 1280),
-    (1080, 1920),
-)
-_SMALL_SHAPES = ((1, 1), (1, 257), (257, 1))
+_TIMING_SHAPES = PYTHON_SIZES
+_SMALL_SHAPES = SMALL_CORRECTNESS_SIZES
 
 TIMING_CASES = tuple(
     (shape, dtype, None) for shape in _TIMING_SHAPES for dtype in ("float32", "uint8")

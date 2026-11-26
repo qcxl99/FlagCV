@@ -1,10 +1,11 @@
 # FlagCV
 
 FlagCV provides immediate-mode GPU image processing through OpenCV-shaped C++
-interfaces and a standalone runtime. The NVIDIA delivery covers add, subtract,
+interfaces and a standalone runtime. The delivery covers add, subtract,
 multiply, bitwise AND, bitwise NOT, and flip. The public library uses caller-owned
 image memory and native streams. Triton compilation runs in a separate Python
-process.
+process. C++ is FlagCV's public interface. Python supports internal compilation,
+correctness evaluation and benchmarks.
 
 FlagCV is part of FlagOS. Kernel support, backend validation and the development
 queue are tracked in [the operator inventory](docs/operators.md). For a change
@@ -17,7 +18,7 @@ to this standalone repository, use [the FlagCV merge requirements](CONTRIBUTING.
 On Linux, the runtime build uses:
 
 - CMake 3.23+ and a C++17 compiler
-- Python 3.10+ for the merge checker, with upstream Triton for NVIDIA or the backend's supported [FlagTree/Triton distribution](https://github.com/flagos-ai/flagtree).
+- Python 3.10+ for validation and a supported FlagTree distribution for GPU compilation. [FlagTree](https://github.com/flagos-ai/flagtree)
 
 Plus the toolchain of the backend you build. `libflagcv` itself links no vendor SDK and no CUDA: it reaches the device only through a `dlopen`'d plugin, so selecting a backend never changes the core.
 
@@ -30,9 +31,7 @@ Plus the toolchain of the backend you build. `libflagcv` itself links no vendor 
 | `mthreads` | MUSA runtime |
 | `thead` | PPU driver API (`CUstream`), T-Head PPU SDK |
 
-NVIDIA coverage comes from the existing six-operator release. AMD and Hygon
-qualification is recorded per device, SDK and compiler in the HIP validation
-guide. Iluvatar, MThreads and T-Head can be built with their SDKs and await
+Iluvatar, MThreads and T-Head can be built with their SDKs and await
 native launch qualification.
 For Iluvatar, use `-DCUDAToolkit_ROOT=<corex>`.
 
@@ -62,7 +61,7 @@ The installed consumer uses the shared Runtime for automatic discovery of
 relocated plugins and data. Static linking can use `FLAGCV_DATA_DIR` and
 `FLAGCV_PLUGIN_DIR` to select those installed resources explicitly.
 
-Enable `FLAGCV_TEST_NVIDIA` to build the public C++ API and backend failure tests with OpenCV CPU 5. See [NVIDIA validation](docs/nvidia-validation.md) for the complete test and benchmark commands.
+See [testing](docs/testing.md) for build profiles and installed-consumer checks.
 
 ### Use from C++
 
@@ -136,11 +135,9 @@ See [the architecture](docs/architecture.md) for cache keys and ownership.
 
 ### Correctness and performance
 
-OpenCV CPU defines operator semantics. The C++ API and Python kernel have
-separate NVIDIA benchmarks against same-device OpenCV CUDA. Build the bridge
-and use the commands and acceptance reports in
-[NVIDIA validation](docs/nvidia-validation.md). Python candidate injection and
-FlagGems-compatible reporting are documented in [Python evaluation](docs/python-evaluation.md).
+OpenCV CPU defines operator semantics. For Python kernel and C++ API timing,
+see [benchmarking](docs/benchmark.md). Current device and toolchain evidence
+is listed in the [operator inventory](docs/operators.md).
 
 ### Environment variables
 

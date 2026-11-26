@@ -15,6 +15,7 @@ include(CTest)
 
 option(BUILD_SHARED_LIBS "Build the relocatable FlagCV shared runtime" ON)
 option(FLAGCV_BUILD_TESTS "Build FlagCV tests" ${BUILD_TESTING})
+option(FLAGCV_BUILD_BENCHMARKS "Build FlagCV C++ benchmarks" ${FLAGCV_BENCHMARK_NVIDIA})
 option(FLAGCV_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 
 set(FLAGCV_BACKENDS "nvidia"
@@ -67,4 +68,18 @@ install(FILES
 if(FLAGCV_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(FLAGCV_BUILD_BENCHMARKS)
+  add_subdirectory(benchmark)
+endif()
+
+if(FLAGCV_BUILD_TESTS OR FLAGCV_BUILD_BENCHMARKS)
+  include(cmake/FlagCVValidation.cmake)
+  if(FLAGCV_TEST_HIP)
+    message(FATAL_ERROR "FLAGCV_TEST_HIP was removed; use FLAGCV_TEST_AMD or FLAGCV_TEST_HYGON.")
+  endif()
+  foreach(vendor IN ITEMS nvidia amd hygon)
+    add_subdirectory(backends/${vendor}/validation)
+  endforeach()
 endif()
