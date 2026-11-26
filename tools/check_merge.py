@@ -8,12 +8,14 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from benchmark.report import read_cpp, read_python  # noqa: E402
+from helpers.baseline import summarize  # noqa: E402
 from helpers.benchmark_protocol import PROFILES  # noqa: E402
 
 
@@ -104,6 +106,9 @@ def validate(args):
             exe = build / "backends" / backend / "validation" / f"flagcv_benchmark_{backend}"
             run("cpp-benchmark", exe, "0", cpp)
             options = ["--base-data", args.base_data.resolve()] if args.base_data else []
+            if args.target_profile:
+                options += ["--target-profile", args.target_profile.resolve()]
+                summary["target_profile"] = str(args.target_profile.resolve())
             run("python-benchmark", *pytest, "benchmark", "--builtin", "--device", "cuda:0",
                 "--benchmark-profile", args.python_benchmark_profile, "--record", "json",
                 "--output", python, *options, extra_env=benchmark_env)
@@ -112,7 +117,9 @@ def validate(args):
             if len(convenience) != 3:
                 raise ValueError("expected three steady-state setDevice comparison cases")
             summary.update(device=device, cpp_cases=len(explicit), convenience_cases=len(convenience),
-                           python_cases=len(kernels))
+                           python_cases=len(kernels),
+                           cpp_native_statuses=dict(Counter(row["native_status"] for row in explicit.values())),
+                           python_comparisons=summarize(list(kernels.values())))
         summary["status"] = "passed"
     finally:
         (output / "acceptance.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -126,6 +133,7 @@ def main():
     parser.add_argument("--hip-dir", type=Path, help="HIP CMake package directory")
     parser.add_argument("--python-benchmark-profile", choices=tuple(PROFILES), default="default")
     parser.add_argument("--base-data", type=Path)
+    parser.add_argument("--target-profile", type=Path, help="Measured target resources by case ID")
     parser.add_argument("--devices", type=int, default=1)
     parser.add_argument("--jobs", type=int, default=2)
     args = parser.parse_args()

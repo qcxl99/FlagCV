@@ -59,6 +59,27 @@ workload 和原始结果。HIP 编译阶段检查输出的 ABI，规则见
 原生比较器的语义及分配边界。同卡有 ATen 等价实现时可配对。不可比的
 路径分别标明原因。结果不能跨卡作为优化前后比值。
 
+## Python 原生比较覆盖
+
+`--baseline auto` 只为已验证的 Hygon BW1000 (`BW`, `gfx936`, 80 CU)、
+PyTorch 2.9.0 指定构建 / HIP 6.3.26045 和 builtin Python kernel 启用
+`aten_hip_out`。七个 Core 尺寸的 `uint8` `bitwise_and` / `bitwise_not`
+均为单通道、无掩码、紧凑且不别名，使用预分配、同卡同 stream 的
+ATen `out=`；逐例与 OpenCV CPU 核对。实卡 trace 对每个实现只观察到
+一次 kernel launch，二者在同一非默认 stream，无计时区内分配、拷贝或同步。
+这不是 C++ API 的原生对照资格。
+
+| HIP 用例 | `native_status` 及范围 |
+| --- | --- |
+| 上述 14 个 Core case，匹配设备与构建 | `passed`；逐例验证或计时出错则 `failed`，不以外部比值改写正式失败。 |
+| 其它设备/构建、dtype、布局、掩码或候选边界下的 AND/NOT | `pending`；已找到 `out=`，待验证。 |
+| `uint8` add/subtract/multiply | `not_equivalent`；普通 ATen 算术回绕，FlagCV 饱和。 |
+| `float32` add/subtract/multiply | `pending`；已找到 `out=`，待核对语义及执行边界。 |
+| flip | `not_equivalent`；直接 `torch.flip` 分配输出，没有合格的预分配比较器。 |
+
+BW1101 和 W7900D 未在此资格窗口复验，不启用。没有合格原生比较器时仍
+记录候选实测延迟；仅在外部比较满足既有换算条件时才记录正式等效比值。
+
 ## 六算子整改验证
 
 以下资格绑定整改候选 `fd6153c` 及各行设备和工具链。三端均实测双卡公开 API、

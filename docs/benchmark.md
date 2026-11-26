@@ -20,7 +20,8 @@ Python 和六个 Optest recipe 共用 92 个 Core 用例。Case ID 由规范化�
 1000 ms 预热、100 ms 测量和三轮配对。`--warmup` 和 `--iter` 改变
 非 Graph 时间预算，报告保留实际协议。
 
-`--baseline auto` 在 NVIDIA 运行等价的 OpenCV CUDA 比较器。
+`--baseline auto` 在 NVIDIA 运行等价的 OpenCV CUDA 比较器，并在
+[已验证的 HIP 用例](hip-validation.md#python-原生比较覆盖)使用 ATen `out=`。
 同设备结果使用 `latency`、`latency_base` 和 `speedup`。
 `--base-data PATH` 读入 Optest 数据，用独立 shape key 定位记录后核对
 完整配置、dtype 和计时协议。同尺寸但 flip code、mask 或布局不同的记录
@@ -36,9 +37,12 @@ Python 和六个 Optest recipe 共用 92 个 Core 用例。Case ID 由规范化�
 设备实测资源值。外部原始比值除以该系数得到 `compared_speedup`。
 缺项保留 `base_miss_reason` 和可比的原始比值。汇总保留原生、等效、仅
 原始比值、缺失、不可比和失败的状态与分母。
+`tools/check_merge.py` 转发 `--base-data` 和 `--target-profile`，在
+`acceptance.json` 的 `python_comparisons` 写入逐例正式状态计数和按比较来源
+分组的比值与分母。C++ 原生状态另记为 `cpp_native_statuses`。
 
 原生 0.90×、普通等效 80% 和关键算子等效 95% 用于评审差距和优先级。
-项目验收记录实际功能、覆盖情况和性能偏离。
+项目验收以正确性和报告完整性为门槛；性能数值只用于参考。
 
 ## C++ API
 

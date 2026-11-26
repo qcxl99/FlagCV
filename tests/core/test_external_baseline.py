@@ -87,6 +87,6 @@ def test_successful_native_wins_and_failure_survives_display_fallback():
     assert equivalent["formal_speedup"] == 2.0
     assert without_scale["formal_status"] == "raw_only"
     assert summarize([native, fallback, equivalent, without_scale]) == {
-        "cases": 4, "statuses": {"passed": 2, "failed": 1, "raw_only": 1},
+        "cases": 4, "statuses": {"passed": 2, "failed": 1, "raw_only": 1}, "native_statuses": {},
         "comparisons": {"origin": {"count": 1, "mean": 0.8}, "nv_baseline": {"count": 1, "mean": 2.0}},
     }

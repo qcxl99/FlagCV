@@ -42,7 +42,13 @@ class Handle {
   std::unique_ptr<State> state_;
 };
 
-/* Selects the device used by the convenience overloads on this thread. */
+/*
+ * Selects the backend and device ordinal for convenience overloads on the
+ * calling thread. A successful selection is required before their first use.
+ * Re-selecting a pair reuses its thread-local Handle and loaded modules until
+ * thread exit. A failed selection leaves the previous selection intact.
+ * Does not select an SDK current device/context or affect explicit Handles.
+ */
 void setDevice(const std::string& backend, int device = 0);
 
 }  // namespace flagcv

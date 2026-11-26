@@ -80,6 +80,42 @@ class VendorPlatformFacts(unittest.TestCase):
 
 
 class ScratchABI(unittest.TestCase):
+    def test_nvidia_rejects_each_ineligible_value_before_toolchain_lookup(self):
+        module = "triton.backends.nvidia.compiler"
+        with patch.dict(sys.modules, {"triton": None}), patch(
+                "importlib.metadata.distribution", side_effect=AssertionError("looked up FlagTree")):
+            for backend, version, compiler, wave in (
+                ("hip", "3.6.0", module, 32), ("cuda", "3.6.0", module, 64),
+                ("cuda", "3.7.0", module, 32), ("cuda", "3.6.0", "custom.compiler", 32),
+            ):
+                with self.subTest(identity=(backend, version, compiler, wave)):
+                    with self.assertRaisesRegex(RuntimeError, "unqualified"):
+                        verify_compiler("nvidia", backend, version, 90, compiler, wave)
+
+    def test_nvidia_qualifies_exact_distribution_and_import_path(self):
+        from importlib import metadata
+
+        compiler = provider("nvidia")
+        target = SimpleNamespace(backend="cuda", arch=90, warp_size=32)
+        module = "triton.backends.nvidia.compiler"
+        installed = Path("/qualified/triton/__init__.py")
+        distribution = SimpleNamespace(version=compiler.FLAGTREE_RELEASE,
+                                       locate_file=lambda path: installed.parent.parent / path)
+        with patch("importlib.metadata.distribution", side_effect=metadata.PackageNotFoundError):
+            with self.assertRaisesRegex(RuntimeError, "unqualified"):
+                compiler.qualify(target, "3.6.0", module)
+        with patch("importlib.metadata.distribution", return_value=distribution) as lookup:
+            with patch.dict(sys.modules, {"triton": SimpleNamespace(__file__=str(installed))}):
+                compiler.qualify(target, "3.6.0", module)
+                lookup.assert_called_once_with("flagtree-nvidia")
+                distribution.version = "other"
+                with self.assertRaisesRegex(RuntimeError, "unqualified"):
+                    compiler.qualify(target, "3.6.0", module)
+            distribution.version = compiler.FLAGTREE_RELEASE
+            with patch.dict(sys.modules, {"triton": SimpleNamespace(__file__="/other/triton.py")}):
+                with self.assertRaisesRegex(RuntimeError, "unqualified"):
+                    compiler.qualify(target, "3.6.0", module)
+
     def test_verified_layout(self):
         for arch in ("gfx936", "gfx938"):
             verify_compiler("hygon", "hip", "3.6.0", arch,
@@ -87,6 +123,8 @@ class ScratchABI(unittest.TestCase):
         verify_compiler("amd", "hip", "3.6.0", "gfx1100",
                                    "triton.backends.amd.compiler", 32)
         self.assertEqual(validated_scratch_args(ZERO, PTX, SIGNATURE), 2)
+        compiled = SimpleNamespace(metadata=ZERO, asm={"ptx": PTX})
+        self.assertEqual(provider("nvidia").validate_scratch(compiled, SIGNATURE), 2)
 
     def test_unqualified_compiler_or_platform(self):
         for identity in (("nvidia", "cuda", "3.7.0"), ("hygon", "hip", "3.6.0"),

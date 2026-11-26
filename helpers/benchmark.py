@@ -193,6 +193,20 @@ def _time_case(config, op_name, candidate, args, row):
     if hasattr(candidate, "prepare"):
         candidate = candidate.prepare(*args)
     baseline_version = None
+    native_comparator = None
+    prepare_native = None
+    if native_mode == "opencv-cuda" or (native_mode == "auto" and vendor == "nvidia"):
+        if not mutated:
+            native_comparator = "opencv_cuda_live"
+            prepare_native = partial(_prepare_baseline, op_name, args, vendor)
+    elif native_mode == "auto" and vendor in ("amd", "hygon"):
+        from adapters import aten_hip
+
+        native_status, native_reason = aten_hip.qualification(
+            op_name, args, row["dtype"], vendor, getattr(candidate, "source", None))
+        if native_status == "eligible":
+            native_comparator = "aten_hip_out"
+            prepare_native = partial(aten_hip.prepare, op_name, args)
 
     def time(function, operands, inputs_to_restore):
         calls = 0
@@ -222,12 +236,11 @@ def _time_case(config, op_name, candidate, args, row):
                 native_status, native_reason = "failed", str(error)
 
     try:
-        wants_native = native_mode == "opencv-cuda" or (native_mode == "auto" and vendor == "nvidia")
-        if wants_native and not mutated:
+        if prepare_native is not None:
             try:
-                baseline, baseline_args = _prepare_baseline(op_name, args, vendor)
-                _validate_outputs(op_name, None, args, baseline, baseline_args)
+                baseline, baseline_args = prepare_native()
                 baseline_version = baseline.version
+                _validate_outputs(op_name, None, args, baseline, baseline_args)
                 native_status, native_reason = "passed", None
             except Exception as error:
                 native_status, native_reason = "failed", str(error)
@@ -261,7 +274,8 @@ def _time_case(config, op_name, candidate, args, row):
         "timing_protocol": protocol, "warmup_ms": None if mutated else warmup,
         "measurement_ms": None if mutated else measurement,
         "native_status": native_status, "native_reason": native_reason,
-        "baseline_source": "opencv_cuda_live" if native_status == "passed" else None,
+        "baseline_source": native_comparator if native_status == "passed" else None,
+        "native_comparator": native_comparator,
         "baseline_version": baseline_version, "accuracy_checked": True,
         "kernel_dispatch": getattr(candidate, "dispatch", None),
         **external, **comparison(native_status, native_reason, native_speedup, external),

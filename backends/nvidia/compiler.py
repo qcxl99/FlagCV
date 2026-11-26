@@ -61,19 +61,23 @@ def kernel_config(request):
 
 
 def qualify(target, version, compiler_module):
+    if (target.backend != "cuda" or target.warp_size != 32
+            or version != "3.6.0" or compiler_module != "triton.backends.nvidia.compiler"):
+        raise_unqualified(PROVIDER, target, version, compiler_module)
+
     from importlib import metadata
     from pathlib import Path
-
-    import triton
 
     try:
         distribution = metadata.distribution("flagtree-nvidia")
     except metadata.PackageNotFoundError:
         raise_unqualified(PROVIDER, target, version, compiler_module)
-    if (target.backend != "cuda" or target.warp_size != 32
-            or version != "3.6.0" or compiler_module != "triton.backends.nvidia.compiler"
-            or distribution.version != FLAGTREE_RELEASE
-            or Path(triton.__file__).resolve()
+    if distribution.version != FLAGTREE_RELEASE:
+        raise_unqualified(PROVIDER, target, version, compiler_module)
+
+    import triton
+
+    if (Path(triton.__file__).resolve()
             != distribution.locate_file("triton/__init__.py").resolve()):
         raise_unqualified(PROVIDER, target, version, compiler_module)
 

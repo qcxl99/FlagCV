@@ -88,10 +88,11 @@ and any `add_hinted_param` divisibility classes match. The Runtime queries
 compiler identity once per backend per process. Restart the process after
 changing registered kernels, providers or compiler settings.
 
-**Files.** Compiled binaries go to `$FLAGCV_CACHE_DIR/artifacts/<hash>/`
-(default `~/.cache/flagcv`), keyed by Triton's compiled artifact hash.
-The hash reflects target, compiler, options and signature. Triton's own cache
-(`~/.triton/cache`) holds intermediate IR. A new process starts a new compiler
+**Files.** Compiled binaries go to `$FLAGCV_CACHE_DIR/artifacts/<backend>/<hash>/`
+(default cache root `~/.cache/flagcv`), with a separate namespace per FlagCV
+backend and a directory keyed by Triton's compiled artifact hash.
+The hash reflects the target, compiler, options, signature and JIT dependencies.
+Triton's own cache (`~/.triton/cache`) holds intermediate IR. A new process starts a new compiler
 process and may reuse Triton artifacts. Each Handle still loads its own device
 modules and releases them before the context.
 

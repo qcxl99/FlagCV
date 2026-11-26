@@ -147,12 +147,15 @@ def comparison(native_status, native_reason, native_speedup, external):
 
 def summarize(rows):
     status = {}
+    native_status = {}
     ratio = {"origin": [], "nv_baseline": []}
     for row in rows:
         state = row["formal_status"]
         status[state] = status.get(state, 0) + 1
+        if (native_state := row.get("native_status")) is not None:
+            native_status[native_state] = native_status.get(native_state, 0) + 1
         if row["formal_speedup"] is not None:
             ratio[row["formal_source"]].append(row["formal_speedup"])
-    return {"cases": len(rows), "statuses": status,
+    return {"cases": len(rows), "statuses": status, "native_statuses": native_status,
             "comparisons": {k: {"count": len(v), "mean": fmean(v) if v else None}
                             for k, v in ratio.items()}}
