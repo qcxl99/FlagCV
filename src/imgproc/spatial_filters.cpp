@@ -202,6 +202,15 @@ class U16CorrelationBound {
     // 2^(absolute_sum_bits - 53) in units of the smallest binary exponent.
     return max_bit_ - min_exponent_ + 1 + 2 * log_terms <= 106;
   }
+  int integer_unit() const {
+    constexpr int unavailable = std::numeric_limits<int>::max();
+    if (!normal_ || terms_ == 0) return unavailable;
+    const int log_terms = terms_ == 1 ? 0 : 1 + std::ilogb(static_cast<double>(terms_ - 1));
+    // The signed three-word accumulator must represent every prefix, not only
+    // the final sum. Each term contributes strictly less than 2^(max_bit+1).
+    int bits = max_bit_ - min_exponent_ + 1 + log_terms;
+    return bits <= 191 ? min_exponent_ : unavailable;
+  }
 
  private:
   std::uint64_t units_ = 0;
@@ -306,7 +315,9 @@ Filter2DPlan::Filter2DPlan(Size kernel, const double* coefficients, Depth source
   }
   data_ = std::make_shared<Data>(Data{kernel, source, destination, options.border, anchor,
                                      zero_filter, all_normal_f32_taps, fp32_integer_exact, bound_u16 && bound.exact(),
-                                     bound_u16 && bound.pair_exact(), has_nonzero_delta, std::move(table)});
+                                     bound_u16 && bound.pair_exact(), has_nonzero_delta,
+                                     bound_u16 ? bound.integer_unit() : std::numeric_limits<int>::max(),
+                                     std::move(table)});
 }
 
 HostTableData Filter2DPlan::table() const {

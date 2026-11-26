@@ -201,6 +201,94 @@ def filter2d_dft_precision(src_ptr, dst_ptr, coeff_ptr, width, height, src_strid
 
 
 @triton.jit
+def _word192(lo, mid, hi, word):
+    zero = tl.cast(0, tl.uint64)
+    return tl.where(word == 0, lo, tl.where(word == 1, mid, tl.where(word == 2, hi, zero)))
+
+
+@triton.jit
+def _add_shifted192(lo, mid, hi, product, shift, negative):
+    word = shift // 64
+    offset = shift % 64
+    lower = product << offset
+    upper = tl.where(offset == 0, 0, product >> ((64 - offset) % 64))
+    v0 = tl.where(word == 0, lower, 0)
+    v1 = tl.where(word == 1, lower, tl.where(word == 0, upper, 0))
+    v2 = tl.where(word == 2, lower, tl.where(word == 1, upper, 0))
+    # Sign extend the shifted product in two's complement.
+    n0 = tl.cast(0, tl.uint64) - v0
+    n1 = ~v1 + (v0 == 0).to(tl.uint64)
+    n2 = ~v2 + ((v0 == 0) & (v1 == 0)).to(tl.uint64)
+    v0 = tl.where(negative, n0, v0)
+    v1 = tl.where(negative, n1, v1)
+    v2 = tl.where(negative, n2, v2)
+    next_lo = lo + v0
+    mid_sum = mid + v1
+    next_mid = mid_sum + (next_lo < lo).to(tl.uint64)
+    carry = (mid_sum < mid) | (next_mid < mid_sum)
+    return next_lo, next_mid, hi + v2 + carry.to(tl.uint64)
+
+
+@triton.jit
+def _round_saturate_u16_192(lo, mid, hi, exponent):
+    negative = hi >= 0x8000000000000000
+    rounded = tl.full(lo.shape, 0, tl.uint64)
+    if exponent >= 0:
+        if exponent >= 16:
+            rounded = tl.where((lo | mid | hi) != 0, 65535, 0).to(tl.uint64)
+        else:
+            saturate = ((mid | hi) != 0) | (lo > (65535 >> exponent))
+            rounded = tl.where(saturate, 65535, lo << exponent)
+    else:
+        shift = -exponent
+        if shift < 192:
+            word = shift // 64
+            offset = shift % 64
+            first = _word192(lo, mid, hi, word)
+            second = _word192(lo, mid, hi, word + 1)
+            quotient = (first >> offset) | tl.where(offset == 0, 0, second << ((64 - offset) % 64))
+            high_bits = (second >> offset) | _word192(lo, mid, hi, word + 2)
+            guard_at = shift - 1
+            guard_word = guard_at // 64
+            guard_offset = guard_at % 64
+            part = _word192(lo, mid, hi, guard_word)
+            guard = ((part >> guard_offset) & 1) != 0
+            mask = (tl.cast(1, tl.uint64) << guard_offset) - 1
+            sticky = ((part & mask) != 0) | ((guard_word > 0) & (lo != 0)) | ((guard_word > 1) & (mid != 0))
+            up = guard & (sticky | ((quotient & 1) != 0))
+            saturated = (high_bits != 0) | (quotient >= 65535)
+            rounded = tl.where(saturated, 65535, quotient + up.to(tl.uint64))
+    return tl.where(negative, 0, rounded).to(tl.uint16)
+
+
+@triton.jit
+def filter2d_u16_exact(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                       kernel_width, kernel_height, anchor_x, anchor_y, unit_exponent,
+                       CHANNELS: tl.constexpr, BORDER: tl.constexpr, BLOCK: tl.constexpr):
+    x, y, channel, mask = _pixel_indices(width, height, CHANNELS, BLOCK)
+    lo = tl.full((BLOCK,), 0, tl.uint64)
+    mid = tl.full((BLOCK,), 0, tl.uint64)
+    hi = tl.full((BLOCK,), 0, tl.uint64)
+    for ky in range(kernel_height):
+        for kx in range(kernel_width):
+            weight = tl.load(coeff_ptr + 1 + ky * kernel_width + kx).to(tl.float32)
+            bits = tl.cast(weight, tl.uint32, bitcast=True)
+            if (bits & 0x7fffffff) != 0:
+                significand = (bits & 0x7fffff) | 0x800000
+                lsb = significand & (tl.cast(0, tl.uint32) - significand)
+                # lsb is a power of two, so conversion and exponent extraction are exact.
+                trailing = (tl.cast(lsb.to(tl.float32), tl.uint32, bitcast=True) >> 23).to(tl.int32) - 127
+                exponent = ((bits >> 23) & 255).to(tl.int32) - 150 + trailing
+                pixel = _load_pixel(src_ptr, x + kx - anchor_x, y + ky - anchor_y,
+                                    channel, width, height, src_stride, mask, CHANNELS, BORDER)
+                product = pixel.to(tl.uint64) * (significand >> trailing).to(tl.uint64)
+                lo, mid, hi = _add_shifted192(lo, mid, hi, product, exponent - unit_exponent,
+                                              (bits & 0x80000000) != 0)
+    result = _round_saturate_u16_192(lo, mid, hi, unit_exponent)
+    tl.store(dst_ptr + y * dst_stride + x * CHANNELS + channel, result, mask)
+
+
+@triton.jit
 def gaussian_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
                     kernel_width, kernel_height, CHANNELS: tl.constexpr, BORDER: tl.constexpr,
                     FP64: tl.constexpr, FIXED_BITS: tl.constexpr, BLOCK: tl.constexpr):

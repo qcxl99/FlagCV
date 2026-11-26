@@ -183,6 +183,8 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
   const bool scaled = channels == 1 && std::abs(delta) >= std::numeric_limits<double>::epsilon();
   const Size vector = dft && scaled ? dft_vector_extent(dst, data.kernel) : Size{0, 0};
   const bool use_dft = dft && vector.width >= 0;
+  const bool use_exact = !use_dft && area >= 50 && u16 && dst_u16 && !data.has_nonzero_delta &&
+                         !data.fp32_integer_exact && data.u16_exact_unit != std::numeric_limits<int>::max();
   const bool dense_pair_candidate =
       data.source_depth == Depth::k32F && data.destination_depth == Depth::k32F &&
       data.border == Border::kReflect101 && data.all_normal_f32_taps && src.channels() == 3 &&
@@ -195,6 +197,7 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
       src.width() >= 1920 && src.height() >= 1080 &&
       data.kernel.width == 7 && data.kernel.height == 7;
   const char* kernel = use_dft ? "filter2d_dft_precision" :
+                       use_exact ? "filter2d_u16_exact" :
                        dense_pair_candidate ? "filter2d_dense" :
                        interior_candidate ? "filter2d_interior" : "filter2d_direct";
   auto op = prepare(kernel,
@@ -205,6 +208,12 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
   op.add_param("kernel_height", data.kernel.height);
   op.add_param("anchor_x", data.anchor.x);
   op.add_param("anchor_y", data.anchor.y);
+  if (use_exact) {
+    op.add_param("unit_exponent", data.u16_exact_unit);
+    op.add_constexpr("CHANNELS", channels);
+    op.add_constexpr("BORDER", border_code(data.border));
+    return op;
+  }
   if (use_dft) {
     op.add_param("vector_columns", vector.width);
     op.add_param("vector_rows", vector.height);

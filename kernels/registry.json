@@ -195,6 +195,11 @@
       "name": "filter2d_dft_precision",
       "source": "common/spatial_filters.py",
       "function": "filter2d_dft_precision"
+    },
+    {
+      "name": "filter2d_u16_exact",
+      "source": "common/spatial_filters.py",
+      "function": "filter2d_u16_exact"
     }
   ]
 }

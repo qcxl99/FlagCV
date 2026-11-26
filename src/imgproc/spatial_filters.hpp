@@ -28,6 +28,7 @@ struct Filter2DPlan::Data {
   bool fp64_u16_exact;
   bool fp64_u16_pair_exact;
   bool has_nonzero_delta;
+  int u16_exact_unit;
   std::vector<double> coefficients;
 };
 
