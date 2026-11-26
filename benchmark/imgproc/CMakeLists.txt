@@ -54,7 +54,7 @@ execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${PROJECT_SOURCE_D
                 OUTPUT_VARIABLE revision OUTPUT_STRIP_TRAILING_WHITESPACE)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/live-install.json"
   "{\"revision\":\"${revision}\",\"runners\":\"${runners}\",\"backend\":\"${live_backend}\",\"libdir\":\"${CMAKE_INSTALL_LIBDIR}\"}\n")
-install(FILES first.py geometry.py arithmetic_filters.py batch.py live_support.py cases.json
+install(FILES first.py geometry.py arithmetic_filters.py batch.py live_support.py u8_k13_reference.py cases.json
               "${CMAKE_CURRENT_BINARY_DIR}/live-install.json"
               "${PROJECT_SOURCE_DIR}/tests/test_projective.py"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/flagcv/benchmark/imgproc")
