@@ -88,6 +88,119 @@ def filter2d_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_
 
 
 @triton.jit
+def _two_sum(a, b):
+    total = a + b
+    offset = total - a
+    return total, (a - (total - offset)) + (b - offset)
+
+
+@triton.jit
+def _compensated_add(high, low, x):
+    summed = high + x
+    error = tl.where(tl.abs(high) >= tl.abs(x), (high - summed) + x, (x - summed) + high)
+    return summed, low + error
+
+
+@triton.jit
+def _round_pair_f32(high, tail):
+    nearest = high.to(tl.float32)
+    nearest_wide = nearest.to(tl.float64)
+    bits = tl.cast(nearest, tl.uint32, bitcast=True)
+    direction_up = high > nearest_wide
+    signed = (bits & 0x80000000) != 0
+    bits_next = tl.where(direction_up != signed, bits + 1, bits - 1)
+    bits_next = tl.where(nearest == 0.0, tl.where(direction_up, 1, 0x80000001), bits_next)
+    neighbor = tl.cast(bits_next.to(tl.uint32), tl.float32, bitcast=True)
+    neighbor_wide = neighbor.to(tl.float64)
+    # The finite FP32 overflow midpoint is between MAX and 2^128.
+    mag = tl.abs(nearest_wide)
+    neighbor_mag = tl.abs(neighbor_wide)
+    overflow = mag > 1.0e300
+    native = tl.where(overflow, tl.where(signed, -340282366920938463463374607431768211456.0, 340282366920938463463374607431768211456.0), nearest_wide)
+    other = tl.where(neighbor_mag > 1.0e300,
+                     tl.where(signed, -340282366920938463463374607431768211456.0, 340282366920938463463374607431768211456.0), neighbor_wide)
+    midpoint = (native + other) * 0.5
+    crosses = (high == midpoint) & tl.where(direction_up, tail > 0.0, tail < 0.0)
+    return tl.where(crosses, neighbor, nearest)
+
+
+@triton.jit
+def _round_pair_i32(high, tail):
+    floor = tl.floor(high)
+    safe = (floor >= -2147483648.0) & (floor < 2147483648.0)
+    base = tl.where(safe, floor, 0).to(tl.int64)
+    fraction = high - floor
+    up = (fraction > 0.5) | ((fraction == 0.5) & ((tail > 0.0) | ((tail == 0.0) & ((base & 1) != 0))))
+    rounded = base + up.to(tl.int64)
+    return tl.where(safe & (rounded <= 2147483647), rounded, -2147483648)
+
+
+@triton.jit
+def filter2d_dft_precision(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
+                           kernel_width, kernel_height, anchor_x, anchor_y,
+                           vector_columns, vector_rows, CHANNELS: tl.constexpr,
+                           BORDER: tl.constexpr,
+                           ADD_F32_DELTA: tl.constexpr, SCALED: tl.constexpr,
+                           DEST_U16: tl.constexpr, COMPENSATED: tl.constexpr, BLOCK: tl.constexpr):
+    x, y, channel, mask = _pixel_indices(width, height, CHANNELS, BLOCK)
+    work: tl.constexpr = tl.float64
+    value = tl.full((BLOCK,), 0, work)
+    low = tl.full((BLOCK,), 0, work)
+    for ky in range(kernel_height):
+        for kx in range(kernel_width):
+            weight = tl.load(coeff_ptr + 1 + ky * kernel_width + kx).to(tl.float32)
+            if weight != 0:
+                pixel = _load_pixel(src_ptr, x + kx - anchor_x, y + ky - anchor_y,
+                                    channel, width, height, src_stride, mask, CHANNELS, BORDER)
+                product = pixel.to(work) * weight.to(work)
+                if COMPENSATED:
+                    value, low = _compensated_add(value, low, product)
+                else:
+                    value += product
+    if COMPENSATED:
+        value, low = _two_sum(value, low)
+    tail = tl.full((BLOCK,), 0, work)
+    if ADD_F32_DELTA:
+        # The multichannel CPU path stores correlation in a float temporary,
+        # performs the float scalar add, then optionally converts to U16.
+        if COMPENSATED:
+            narrowed = _round_pair_f32(value, low)
+        else:
+            narrowed = value.to(tl.float32)
+        value_f32 = narrowed + tl.load(coeff_ptr).to(tl.float32)
+        result = value_f32.to(work)
+    elif SCALED:
+        # Fixed SSE3 convertScale narrows correlation in vector tiles.
+        delta = tl.load(coeff_ptr).to(tl.float32)
+        if COMPENSATED:
+            narrowed = _round_pair_f32(value, low)
+        else:
+            narrowed = value.to(tl.float32)
+        vector = (narrowed + delta).to(work)
+        vector_lane = (x < vector_columns) & (y < vector_rows)
+        if COMPENSATED:
+            high, low = _compensated_add(value, low, delta.to(work))
+            scalar, scalar_tail = _two_sum(high, low)
+            result = tl.where(vector_lane, vector, scalar)
+            tail = tl.where(vector_lane, 0.0, scalar_tail)
+        else:
+            result = tl.where(vector_lane, vector, value + delta.to(work))
+    else:
+        result = value
+        tail = low
+    if DEST_U16:
+        result = _limit_finite_u16(result)
+        if COMPENSATED:
+            signed = _round_pair_i32(result, tail)
+        else:
+            signed = _rounded_i32(result)
+        output = tl.minimum(tl.maximum(signed, 0), 65535)
+        tl.store(dst_ptr + y * dst_stride + x * CHANNELS + channel, output, mask)
+    else:
+        tl.store(dst_ptr + y * dst_stride + x * CHANNELS + channel, result, mask)
+
+
+@triton.jit
 def gaussian_direct(src_ptr, dst_ptr, coeff_ptr, width, height, src_stride, dst_stride,
                     kernel_width, kernel_height, CHANNELS: tl.constexpr, BORDER: tl.constexpr,
                     FP64: tl.constexpr, FIXED_BITS: tl.constexpr, BLOCK: tl.constexpr):

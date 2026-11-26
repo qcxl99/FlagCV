@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -110,6 +111,108 @@ bool correlation_depths(Depth source, Depth destination) {
   }
 }
 
+std::uint64_t coefficient_magnitude_bits(double value) {
+  static_assert(sizeof(double) == sizeof(std::uint64_t) &&
+                std::numeric_limits<double>::is_iec559);
+  std::uint64_t bits{};
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits & 0x7fffffffffffffffULL;
+}
+
+// The table is uploaded as raw double. Triton narrows its values with RNE,
+// independently of the host's rounding and DAZ/FTZ modes. This certificate
+// conservatively excludes any nonzero value below the normal F32 range.
+bool normal_f32_significand(std::uint64_t bits, std::uint32_t& significand, int& exponent) {
+  constexpr auto fraction_mask = (std::uint64_t{1} << 52) - 1;
+  const int binade = static_cast<int>(bits >> 52) - 1023;
+  if (binade < -126 || binade > 127) return false;
+  constexpr int dropped = 29;
+  constexpr auto halfway = std::uint64_t{1} << (dropped - 1);
+  const auto mantissa = (bits & fraction_mask) | (std::uint64_t{1} << 52);
+  const auto remainder = mantissa & ((std::uint64_t{1} << dropped) - 1);
+  significand = static_cast<std::uint32_t>(mantissa >> dropped);
+  significand += remainder > halfway || (remainder == halfway && (significand & 1));
+  exponent = binade - 23;
+  // A rounded significand can have the carry bit set. The bound below
+  // canonicalizes it along with other trailing zero bits.
+  return binade != 127 || significand < (1u << 24);
+}
+
+// Use the original coefficient for the exact-integer shortcut. In particular,
+// a raw tiny nonzero double must never be admitted as zero under host DAZ.
+int small_integer_magnitude(double value) {
+  const auto bits = coefficient_magnitude_bits(value);
+  if (!bits) return 0;
+  const int exponent = static_cast<int>(bits >> 52) - 1023;
+  if (exponent < 0 || exponent > 8) return -1;
+  const auto mantissa = (bits & ((std::uint64_t{1} << 52) - 1)) | (std::uint64_t{1} << 52);
+  const int shift = 52 - exponent;
+  if (mantissa & ((std::uint64_t{1} << shift) - 1)) return -1;
+  return static_cast<int>(mantissa >> shift);
+}
+
+// Bound the numerator of every partial sum in a common binary unit.
+class U16CorrelationBound {
+ public:
+  void add(double value, std::uint32_t multiplier) {
+    const auto bits = coefficient_magnitude_bits(value);
+    if (!normal_ || bits == 0) return;
+    std::uint32_t significand{};
+    int exponent{};
+    if (!normal_f32_significand(bits, significand, exponent)) {
+      exact_ = normal_ = false;
+      return;
+    }
+    while ((significand & 1) == 0) {
+      significand >>= 1;
+      ++exponent;
+    }
+    auto term = std::uint64_t{significand} * multiplier;
+    min_exponent_ = std::min(min_exponent_, exponent);
+    max_bit_ = std::max(max_bit_, exponent + std::ilogb(static_cast<double>(term)));
+    ++terms_;
+    if (!exact_) return;
+    if (units_ == 0) unit_exponent_ = exponent;
+    const auto unit = std::min(exponent, unit_exponent_);
+    constexpr std::uint64_t limit = (std::uint64_t{1} << 53) - 1;
+    const int old_shift = unit_exponent_ - unit;
+    const int new_shift = exponent - unit;
+    if (old_shift >= 53 || new_shift >= 53 || units_ > (limit >> old_shift) ||
+        term > (limit >> new_shift)) {
+      exact_ = false;
+      return;
+    }
+    units_ <<= old_shift;
+    term <<= new_shift;
+    if (term > limit - units_) {
+      exact_ = false;
+      return;
+    }
+    units_ += term;
+    unit_exponent_ = unit;
+  }
+
+  bool exact() const { return exact_; }
+  bool pair_exact() const {
+    if (!normal_) return false;
+    if (terms_ <= 1) return true;
+    const int log_terms = 1 + std::ilogb(static_cast<double>(terms_ - 1));
+    // Bound the absolute sum by 2^(max_bit - min_exponent + 1 + log_terms).
+    // The low accumulator stores at most terms_ errors, each at most
+    // 2^(absolute_sum_bits - 53) in units of the smallest binary exponent.
+    return max_bit_ - min_exponent_ + 1 + 2 * log_terms <= 106;
+  }
+
+ private:
+  std::uint64_t units_ = 0;
+  int unit_exponent_ = 0;
+  bool exact_ = true;
+  bool normal_ = true;
+  std::uint32_t terms_ = 0;
+  int min_exponent_ = std::numeric_limits<int>::max();
+  int max_bit_ = std::numeric_limits<int>::min();
+};
+
 void check_coefficient(double value, bool work_double) {
   if (!std::isfinite(value) ||
       (!work_double && std::abs(value) > std::numeric_limits<float>::max()))
@@ -175,18 +278,35 @@ Filter2DPlan::Filter2DPlan(Size kernel, const double* coefficients, Depth source
   table.push_back(options.delta);
   bool zero_filter = true;
   bool all_normal_f32_taps = true;
+  const bool has_nonzero_delta = coefficient_magnitude_bits(options.delta) != 0;
+  bool fp32_integer_exact = source == Depth::k16U && destination == Depth::k16U && !has_nonzero_delta;
+  // A U16 product and each partial sum are exact integers in F32 when
+  // the absolute tap sum multiplied by 65535 fits in the F32 significand.
+  constexpr auto max_exact_u16_tap_sum = (std::uint32_t{1} << std::numeric_limits<float>::digits) /
+                                          std::numeric_limits<std::uint16_t>::max();
+  std::uint32_t absolute_tap_sum = 0;
+  const bool bound_u16 = source == Depth::k16U && !work_double && count >= 50;
+  U16CorrelationBound bound;
+  if (bound_u16 && std::abs(options.delta) >= std::numeric_limits<double>::epsilon())
+    bound.add(options.delta, 1);
   for (int i = 0; i < count; ++i) {
     check_coefficient(coefficients[i], work_double);
     table.push_back(coefficients[i]);
-    const bool nonzero = work_double ? coefficients[i] != 0.0 :
-                                      static_cast<float>(coefficients[i]) != 0.0f;
-    zero_filter &= !nonzero;
-    // The row-pair kernel omits the device zero test. Compare the raw
-    // coefficient to avoid host rounding and device subnormal handling.
+    const double effective = work_double ? coefficients[i] : static_cast<float>(coefficients[i]);
+    zero_filter &= effective == 0.0;
+    // The row-pair kernel omits the device zero test.
     all_normal_f32_taps &= std::abs(coefficients[i]) >= std::numeric_limits<float>::min();
+    if (bound_u16) bound.add(coefficients[i], std::numeric_limits<std::uint16_t>::max());
+    if (fp32_integer_exact) {
+      const auto magnitude = small_integer_magnitude(coefficients[i]);
+      fp32_integer_exact = magnitude >= 0 &&
+                           static_cast<std::uint32_t>(magnitude) <= max_exact_u16_tap_sum - absolute_tap_sum;
+      if (fp32_integer_exact) absolute_tap_sum += static_cast<std::uint32_t>(magnitude);
+    }
   }
   data_ = std::make_shared<Data>(Data{kernel, source, destination, options.border, anchor,
-                                    zero_filter, all_normal_f32_taps, std::move(table)});
+                                     zero_filter, all_normal_f32_taps, fp32_integer_exact, bound_u16 && bound.exact(),
+                                     bound_u16 && bound.pair_exact(), has_nonzero_delta, std::move(table)});
 }
 
 HostTableData Filter2DPlan::table() const {

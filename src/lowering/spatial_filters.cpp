@@ -5,6 +5,8 @@
 #include "src/imgproc/spatial_filters.hpp"
 #include "src/lowering/helpers.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -68,6 +70,47 @@ LoweredOp prepare(const char* name, const GpuMat& src, const GpuMat& dst,
   return op;
 }
 
+struct DftAxis {
+  int transform;
+  int block;
+};
+
+DftAxis dft_axis(int extent, int kernel, int minimum) {
+  // The fixed CPU crossCorr uses 4.5 taps rounded to even, a
+  // 256-element minimum-block heuristic, and a 2/3/5-smooth transform length.
+  const std::int64_t twice = std::int64_t{9} * kernel;
+  const auto rounded = twice / 2 + ((twice & 1) && ((twice / 2) & 1));
+  const auto requested = std::min<std::int64_t>(extent, std::max(rounded, std::int64_t{257} - kernel));
+  for (auto size = std::max<std::int64_t>(minimum, requested + kernel - 1);
+       size <= std::numeric_limits<int>::max(); ++size) {
+    auto remainder = size;
+    for (int factor : {2, 3, 5})
+      while (remainder % factor == 0) remainder /= factor;
+    if (remainder == 1)
+      return {static_cast<int>(size), static_cast<int>(std::min<std::int64_t>(extent, size - kernel + 1))};
+  }
+  return {};
+}
+
+Size dft_vector_extent(const GpuMat& dst, Size kernel) {
+  const auto x = dft_axis(dst.width(), kernel.width, 2);
+  if (x.block == 0) return {-1, -1};
+  const int edge = dst.width() % x.block;
+  // For >=8 elements the final SSE vector starts at tile width minus eight,
+  // including the final columns even when the tile width is not a multiple of eight.
+  if (x.block >= 8) return {edge > 0 && edge < 8 ? dst.width() - edge : dst.width(), dst.height()};
+  // A cropped DFT plane cannot flatten unless the tile spans its full row.
+  if (x.block != x.transform || dst.width() != x.block ||
+      dst.row_pitch() != std::int64_t{x.block} * std::int64_t{sizeof(std::uint16_t)})
+    return {0, 0};
+  const auto y = dft_axis(dst.height(), kernel.height, 1);
+  if (y.block == 0) return {-1, -1};
+  const int min_rows = (8 + x.block - 1) / x.block;
+  if (y.block < min_rows) return {0, 0};
+  const int bottom = dst.height() % y.block;
+  return {dst.width(), bottom > 0 && bottom < min_rows ? dst.height() - bottom : dst.height()};
+}
+
 void common_constants(LoweredOp& op, int channels, Border border, bool work_double) {
   op.add_constexpr("CHANNELS", channels);
   op.add_constexpr("BORDER", border_code(border));
@@ -123,6 +166,23 @@ std::array<LoweredOp, 2> lower_gaussian_separable(
 LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
                          const Filter2DPlan& plan, DeviceWorkspace workspace) {
   const auto& data = SpatialFilterAccess::get(plan);
+  // GpuMat denotes an isolated view. Match the fixed CPU DFT eligibility
+  // only for depth pairs whose accumulation and conversion were qualified.
+  const auto channels = src.channels();
+  const auto area = std::int64_t{data.kernel.width} * data.kernel.height;
+  const bool u16 = data.source_depth == Depth::k16U;
+  const bool dst_u16 = data.destination_depth == Depth::k16U;
+  const bool dst_f32 = data.destination_depth == Depth::k32F;
+  const double delta = data.coefficients.front();
+  // With zero delta, multichannel U16 DFT converts the double correlation
+  // directly to U16. Only its nonzero-delta C3 path uses the F32 temporary.
+  const bool u16_route = u16 && ((dst_u16 && (channels == 1 || !data.has_nonzero_delta)) ||
+                                 (channels == 3 && data.has_nonzero_delta && (dst_u16 || dst_f32)));
+  const bool dft = area >= 50 && !data.fp32_integer_exact && u16_route &&
+                   (data.fp64_u16_exact || data.fp64_u16_pair_exact);
+  const bool scaled = channels == 1 && std::abs(delta) >= std::numeric_limits<double>::epsilon();
+  const Size vector = dft && scaled ? dft_vector_extent(dst, data.kernel) : Size{0, 0};
+  const bool use_dft = dft && vector.width >= 0;
   const bool dense_pair_candidate =
       data.source_depth == Depth::k32F && data.destination_depth == Depth::k32F &&
       data.border == Border::kReflect101 && data.all_normal_f32_taps && src.channels() == 3 &&
@@ -134,7 +194,8 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
       data.border == Border::kReflect101 && !data.zero_filter && src.channels() == 4 &&
       src.width() >= 1920 && src.height() >= 1080 &&
       data.kernel.width == 7 && data.kernel.height == 7;
-  const char* kernel = dense_pair_candidate ? "filter2d_dense" :
+  const char* kernel = use_dft ? "filter2d_dft_precision" :
+                       dense_pair_candidate ? "filter2d_dense" :
                        interior_candidate ? "filter2d_interior" : "filter2d_direct";
   auto op = prepare(kernel,
                     src, dst, data.source_depth, data.destination_depth, workspace, plan.table().bytes);
@@ -144,6 +205,17 @@ LoweredOp lower_filter2d(const GpuMat& src, const GpuMat& dst,
   op.add_param("kernel_height", data.kernel.height);
   op.add_param("anchor_x", data.anchor.x);
   op.add_param("anchor_y", data.anchor.y);
+  if (use_dft) {
+    op.add_param("vector_columns", vector.width);
+    op.add_param("vector_rows", vector.height);
+    op.add_constexpr("CHANNELS", channels);
+    op.add_constexpr("BORDER", border_code(data.border));
+    op.add_constexpr("ADD_F32_DELTA", channels != 1 && data.has_nonzero_delta);
+    op.add_constexpr("SCALED", scaled);
+    op.add_constexpr("DEST_U16", dst_u16);
+    op.add_constexpr("COMPENSATED", !data.fp64_u16_exact);
+    return op;
+  }
   common_constants(op, src.channels(), data.border, data.destination_depth == Depth::k64F);
   op.add_constexpr("ZERO_FILTER", data.zero_filter);
   op.add_constexpr("DEST_INTEGER", is_integer(data.destination_depth));

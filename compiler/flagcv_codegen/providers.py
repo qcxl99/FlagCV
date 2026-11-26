@@ -229,6 +229,7 @@ PLANS["gaussian_f32_local"] = plan_gaussian_f32_local
 PLANS["filter2d_direct"] = plan_spatial_filter
 PLANS["filter2d_interior"] = plan_spatial_filter
 PLANS["filter2d_dense"] = plan_spatial_filter
+PLANS["filter2d_dft_precision"] = plan_spatial_filter
 PLANS["warp_perspective"] = plan_projective
 PLANS["warp_perspective_c4"] = plan_projective
 PLANS["remap"] = plan_projective

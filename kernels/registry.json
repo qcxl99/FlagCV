@@ -190,6 +190,11 @@
       "name": "filter2d_direct",
       "source": "common/spatial_filters.py",
       "function": "filter2d_direct"
+    },
+    {
+      "name": "filter2d_dft_precision",
+      "source": "common/spatial_filters.py",
+      "function": "filter2d_dft_precision"
     }
   ]
 }

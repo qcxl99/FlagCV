@@ -24,6 +24,10 @@ struct Filter2DPlan::Data {
   FilterAnchor anchor;
   bool zero_filter;
   bool all_normal_f32_taps;
+  bool fp32_integer_exact;
+  bool fp64_u16_exact;
+  bool fp64_u16_pair_exact;
+  bool has_nonzero_delta;
   std::vector<double> coefficients;
 };
 
