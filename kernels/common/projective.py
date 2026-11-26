@@ -290,6 +290,28 @@ def _c4_cubic_replicate(src, dst, x, y, ix, iy, ax, ay, h, w, src_rs, dst_rs, ma
 
 
 @triton.jit
+def _sample_cubic_replicate_c4(src, dst, x, y, ix, iy, ax, ay, width, height, src_rs, dst_rs, valid):
+    # Represent pixel/channel as a contiguous four-lane slice. Strides stay
+    # runtime values and no pointer alignment/range hints are asserted.
+    channel = tl.arange(0, 4)[None, :]
+    wx = _cubic_weights(ax)
+    wy = _cubic_weights(ay)
+    dtype: tl.constexpr = src.dtype.element_ty
+    acc = tl.full((), 0, tl.float32)
+    for r in tl.static_range(4):
+        py = tl.minimum(tl.maximum(iy + r, 0), height - 1).to(tl.int64)
+        start = (py * src_rs)[:, None]
+        row = tl.full((), 0, tl.float32)
+        for c in tl.static_range(4):
+            px = tl.minimum(tl.maximum(ix + c, 0), width - 1).to(tl.int64)
+            tap = tl.load(src + start + (px * 4)[:, None] + channel, valid[:, None], other=0)
+            row = row + tap.to(tl.float32) * wx[c][:, None]
+        acc = acc + row * wy[r][:, None]
+    address = dst + y.to(tl.int64) * dst_rs + (x.to(tl.int64) * 4)[:, None] + channel
+    tl.store(address, _rounded_pixel(acc, dtype), valid[:, None])
+
+
+@triton.jit
 def _project_cubic(x, y, m00, m01, m02, m10, m11, m12, m20, m21, m22):
     yd = y.to(tl.float32)
     xd = x.to(tl.float64)
@@ -327,7 +349,7 @@ def perspective_kernel(src_ptr, dst_ptr, m00, m01, m02, m10, m11, m12, m20, m21,
                        src_h, src_w, dst_h, dst_w, src_rs, dst_rs, bv0, bv1, bv2, bv3,
                        CN: tl.constexpr, INTER: tl.constexpr, BORDER: tl.constexpr,
                        BLOCK: tl.constexpr, COL_GRID_LIMIT: tl.constexpr,
-                       VECTOR_C4: tl.constexpr = False):
+                       VECTOR_C4: tl.constexpr = False, PACK_C4: tl.constexpr = False):
     column = tl.program_id(1)
     if COL_GRID_LIMIT:
         column += tl.program_id(2) * COL_GRID_LIMIT
@@ -361,6 +383,8 @@ def perspective_kernel(src_ptr, dst_ptr, m00, m01, m02, m10, m11, m12, m20, m21,
         if VECTOR_C4:
             _c4_cubic_replicate(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, src_h, src_w,
                                 src_rs, dst_rs, active, BLOCK)
+        elif PACK_C4:
+            _sample_cubic_replicate_c4(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, src_w, src_h, src_rs, dst_rs, active)
         else:
             _sample_cubic(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, outside, inner, src_h, src_w,
                           src_rs, dst_rs, bv0, bv1, bv2, bv3, active, CN, BORDER, BLOCK)
@@ -411,7 +435,7 @@ def remap_kernel(src_ptr, dst_ptr, map1_ptr, map2_ptr, map1_rs, map2_rs,
                  src_h, src_w, dst_h, dst_w, src_rs, dst_rs, bv0, bv1, bv2, bv3,
                  CN: tl.constexpr, INTER: tl.constexpr, BORDER: tl.constexpr,
                  LAYOUT: tl.constexpr, RELATIVE: tl.constexpr,
-                 BLOCK: tl.constexpr, COL_GRID_LIMIT: tl.constexpr):
+                 BLOCK: tl.constexpr, COL_GRID_LIMIT: tl.constexpr, PACK_C4: tl.constexpr = False):
     column = tl.program_id(1)
     if COL_GRID_LIMIT:
         column += tl.program_id(2) * COL_GRID_LIMIT
@@ -440,8 +464,11 @@ def remap_kernel(src_ptr, dst_ptr, map1_ptr, map2_ptr, map1_rs, map2_rs,
                         inner = tl.where(x >= dst_w - 4, tail_inner, inner)
         else:
             outside = tl.full((), False, tl.int1)
-        _sample_cubic(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, outside, inner, src_h, src_w,
-                      src_rs, dst_rs, bv0, bv1, bv2, bv3, active, CN, BORDER, BLOCK)
+        if PACK_C4:
+            _sample_cubic_replicate_c4(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, src_w, src_h, src_rs, dst_rs, active)
+        else:
+            _sample_cubic(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, outside, inner, src_h, src_w,
+                          src_rs, dst_rs, bv0, bv1, bv2, bv3, active, CN, BORDER, BLOCK)
     else:
         sx, sy, frac = _maps(map1_ptr, map2_ptr, x, y, map1_rs, map2_rs, active, LAYOUT)
         if LAYOUT < 2:

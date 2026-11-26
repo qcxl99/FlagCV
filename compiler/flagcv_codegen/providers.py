@@ -112,13 +112,18 @@ def plan_projective(request, facts):
             block, warps = 128, 4
         else:
             block, warps = 128, 2
+    modes = {p["name"]: p["value"] for p in request["params"] if p["type"] == "constexpr"}
+    pack_scope = (request["backend"] in ("hip", "hygon") and request["target"] == "hip:gfx936:64"
+                  and modes["CN"] == 4 and modes["INTER"] == 2 and modes["BORDER"] == 1)
+    if pack_scope:
+        warps = 1
     col_limit = 65535 if facts["triton_backend"] in ("cuda", "hip") else 0
     grid = [{"product": ["dst_h"], "block": 1},
             {"product": ["dst_w"], "block": block}, 1]
     if col_limit:
         grid[1]["limit"] = col_limit
         grid[2] = {"product": ["dst_w"], "block": block * col_limit}
-    tuning = {"BLOCK": block, "COL_GRID_LIMIT": col_limit}
+    tuning = {"BLOCK": block, "COL_GRID_LIMIT": col_limit, "PACK_C4": pack_scope}
     if request["kernel"] in ("warp_perspective", "warp_perspective_c4"):
         tuning["VECTOR_C4"] = (request["kernel"] == "warp_perspective_c4" and
                                request["backend"] == "hip" and request["target"] == "hip:gfx1100:32")

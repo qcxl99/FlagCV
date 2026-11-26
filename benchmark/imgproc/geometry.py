@@ -34,7 +34,7 @@ def provider_config(interpolation, border, channels, layout):
                            [dict(name=name, value=value, type="constexpr") for name, value in args.items()],
                            [{"name":"src", "channels":channels}])
     tuning, warps, _ = live.plan(request)
-    return tuning["BLOCK"], warps, tuning["COL_GRID_LIMIT"]
+    return tuning["BLOCK"], warps, tuning["COL_GRID_LIMIT"], tuning["PACK_C4"]
 
 geometry.provider_config = provider_config
 kernels = geometry.kernel_module()
@@ -128,13 +128,13 @@ def run(row):
     guard[2:2+h,5:5+w] = 91
     if not np.all(guard == 91) or not np.array_equal(source.cpu().numpy(), host):
         raise RuntimeError("geometry source or destination guard changed")
-    block, warps, limit = geometry.provider_config(inter, border, channels, -1 if layout < 0 else launch_layout)
+    block, warps, limit, pack_c4 = geometry.provider_config(inter, border, channels, -1 if layout < 0 else launch_layout)
     tiles = triton.cdiv(w, block)
     launch = dict(path=str(kernel_path), sha256=kernel_sha, name=compiled.metadata.name,
                   hash=compiled.hash, code_sha256=live.artifact(compiled), target=live.identity()["target"], block=block, num_warps=warps,
                   num_stages=compiled.metadata.num_stages,
                   enable_fp_fusion=compiled.metadata.enable_fp_fusion,
-                  grid=[h, min(tiles, limit), triton.cdiv(tiles, limit)], vector_c4=vector_c4)
+                  grid=[h, min(tiles, limit), triton.cdiv(tiles, limit)], vector_c4=vector_c4, pack_c4=pack_c4)
     if alias_request:
         launch["alias_request"] = alias_request
     if live.HIP or live.VERIFY_ONLY:

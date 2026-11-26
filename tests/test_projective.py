@@ -87,7 +87,7 @@ def provider_config(interpolation, border, channels, layout):
                    kernel="warp_perspective" if layout < 0 else "remap",
                    params=[dict(name=name, value=value, type="constexpr") for name, value in args.items()])
     tuning, warps, _, _ = compile_with_plan(request)
-    return tuning["BLOCK"], warps, tuning["COL_GRID_LIMIT"]
+    return tuning["BLOCK"], warps, tuning["COL_GRID_LIMIT"], tuning["PACK_C4"]
 
 
 def native_candidate(module, src, dst, interpolation, border, flag, coefficients=None,
@@ -95,7 +95,7 @@ def native_candidate(module, src, dst, interpolation, border, flag, coefficients
     import triton
 
     height, width = dst.shape[:2]
-    planned_block, planned_warps, limit = provider_config(
+    planned_block, planned_warps, limit, pack_c4 = provider_config(
         interpolation, border, src.shape[2], -1 if coefficients is not None else layout)
     block = planned_block if block is None else block
     warps = planned_warps if warps is None else warps
@@ -105,6 +105,7 @@ def native_candidate(module, src, dst, interpolation, border, flag, coefficients
                       enable_fp_fusion=False)
     columns = triton.cdiv(width, block)
     constexprs["COL_GRID_LIMIT"] = limit
+    constexprs["PACK_C4"] = pack_c4 and block == planned_block and warps == planned_warps
     grid = ((height, min(columns, limit), triton.cdiv(columns, limit))
             if limit else (height, columns, 1))
     if coefficients is not None:
