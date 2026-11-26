@@ -264,6 +264,7 @@ def hip_baseline(row, cpu, src, dst, reference, launch, candidate, layouts, guar
     comparer = dict(path=str(path), sha256=sha256(path.read_bytes()).hexdigest())
 
     def refused(reason):
+        live.hip_runtime_path()
         return dict(live.candidate_only(launch, candidate, profile, args.profile, reason),
                     comparer=comparer, layouts=layouts)
 
@@ -273,12 +274,14 @@ def hip_baseline(row, cpu, src, dst, reference, launch, candidate, layouts, guar
     # The external provider is optional. Admit the actual result, per case, against the fixed CPU.
     try:
         spec.loader.exec_module(adapter)
+        live.hip_runtime_path()
         baseline = adapter.prepare_first(row, src, dst, transform=np.array(matrices[row["geometry"]]).reshape(2, 3))
         if baseline is None:
             return refused("adapter has no equivalent case")
         pointer = dst.data_ptr()
         baseline()
         stream.synchronize()
+        live.hip_runtime_path()
         if dst.data_ptr() != pointer or live.output_layout(dst) != layouts["comparator"]:
             return refused("comparator output layout changed")
         if not guard_ok():

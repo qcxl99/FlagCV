@@ -19,6 +19,23 @@ HIP = BACKEND in ("hip", "hygon")
 VERIFY_ONLY = "FLAGCV_IMGP_VERIFY_ONLY" in os.environ
 
 
+def hip_runtime_path():
+    paths = set()
+    for line in Path("/proc/self/maps").read_text().splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) == 6:
+            path = Path(fields[5])
+            if path.is_absolute() and path.name.startswith("libamdhip64.so"):
+                paths.add(path.resolve(strict=True))
+    if len(paths) != 1:
+        raise RuntimeError("the plugin and Torch need a single loaded HIP runtime")
+    runtime_path = str(paths.pop())
+    expected = os.environ.get("FLAGCV_IMGP_HIP_RUNTIME")
+    if expected and expected != runtime_path:
+        raise RuntimeError("the Python case resolved a different HIP runtime library")
+    return runtime_path
+
+
 @lru_cache
 def identity():
     import torch
@@ -40,19 +57,7 @@ def identity():
     if HIP:
         if torch.version.hip is None:
             raise RuntimeError("expected a HIP Torch build")
-        paths = set()
-        for line in Path("/proc/self/maps").read_text().splitlines():
-            fields = line.split(maxsplit=5)
-            if len(fields) == 6:
-                path = Path(fields[5])
-                if path.is_absolute() and path.name.startswith("libamdhip64.so"):
-                    paths.add(path.resolve(strict=True))
-        if len(paths) != 1:
-            raise RuntimeError("the plugin and Torch need a single loaded HIP runtime")
-        runtime_path = str(paths.pop())
-        expected_runtime = os.environ.get("FLAGCV_IMGP_HIP_RUNTIME")
-        if expected_runtime and expected_runtime != runtime_path:
-            raise RuntimeError("the Python case resolved a different HIP runtime library")
+        runtime_path = hip_runtime_path()
         runtime = ctypes.CDLL(runtime_path)
         bus_id = ctypes.create_string_buffer(32)
         version = ctypes.c_int()

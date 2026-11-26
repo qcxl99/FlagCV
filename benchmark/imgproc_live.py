@@ -106,11 +106,13 @@ def python_samples(case, raw, profile, verify_only):
         "COMPARABLE", "SEMANTICS_DIFFER", "NATIVE_REFUSED", "NATIVE_LAYOUT_CHANGED", "CANDIDATE_ONLY")
     if state not in admitted or not row.get("launch"):
         raise ValueError(f"{case} failed independent Python CPU verification: {row.get('error', state)}")
-    if verify_only and any(row.get(key) not in (None, [], {}) for key in
-                           ("ratio", "event_us", "flagcv_us", "opencv_cuda_us", "native_sync_wall_us",
-                            "pairs", "samples", "timing")):
-        raise ValueError(f"{case} verify-only Python result contains timings or ratios")
-    expected_count = 0 if verify_only else PROFILES[profile].samples
+    if verify_only:
+        fields = {"id", "classification", "launch", "candidate_verified",
+                  "candidate_cutoff", "cpu_cutoff", "flagcv_launches"}
+        if row.get("candidate_verified") is not True or row.keys() - fields:
+            raise ValueError(f"{case} invalid verify-only Python result")
+        return row
+    expected_count = PROFILES[profile].samples
     if len(row.get("pairs") or row.get("samples") or []) != expected_count:
         raise ValueError(f"{case} missing installed Python timing samples")
     return row
