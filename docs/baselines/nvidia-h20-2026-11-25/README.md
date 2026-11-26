@@ -13,9 +13,16 @@
 | bitwise_not | 0.949× / 0.978× | 2.654× / 2.691× |
 | flip | 0.919× / 0.910× | 2.515× / 2.482× |
 
-比值为 OpenCV CUDA 中位延迟除以 FlagCV 中位延迟。四份报告均达到当时使用的
-`0.90×` 参考值。当前合入评审保留逐例结果，不以该值阻断。[C++ 卡 0](cpp-0.csv) · [C++ 卡 1](cpp-1.csv) ·
-[Python 卡 0](python-0.json) · [Python 卡 1](python-1.json)
+比值为 OpenCV CUDA 中位延迟除以 FlagCV 中位延迟。原始结果首次纳入
+`d052e25a28a366249ca270bf8459f70f28db3241`。交付快照保存了原始结果、执行
+源码和冻结用例清单。按原协议读取 C++ 的 stream 和 submit 中位数，以及
+Python 的逐轮样本。新版 API Latency 需要以相同协议重测。
+
+[C++ 卡 0](https://github.com/qcxl99/FlagCV/blob/a9a74dfddcba75ab140b3db4232009ac16513b81/docs/baselines/nvidia-h20-2026-11-25/cpp-0.csv)
+· [C++ 卡 1](https://github.com/qcxl99/FlagCV/blob/a9a74dfddcba75ab140b3db4232009ac16513b81/docs/baselines/nvidia-h20-2026-11-25/cpp-1.csv)
+· [Python 卡 0](https://github.com/qcxl99/FlagCV/blob/a9a74dfddcba75ab140b3db4232009ac16513b81/docs/baselines/nvidia-h20-2026-11-25/python-0.json)
+· [Python 卡 1](https://github.com/qcxl99/FlagCV/blob/a9a74dfddcba75ab140b3db4232009ac16513b81/docs/baselines/nvidia-h20-2026-11-25/python-1.json)
+· [冻结用例清单](https://github.com/qcxl99/FlagCV/blob/a9a74dfddcba75ab140b3db4232009ac16513b81/benchmark/nvidia_cases.json)
 
 ## 环境
 
