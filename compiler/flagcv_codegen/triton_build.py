@@ -145,10 +145,16 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
     _check_arguments(fn, request, tuning)
 
     signature, constexprs, attrs = {}, {}, {}
+    # This alias is emitted only after lowering checks both byte spans against
+    # INT32_MAX. The vector helper clamps every source tap and bounds stores.
+    buffer32 = (request["kernel"] == "warp_perspective_c4" and
+                request["target"] == "hip:gfx1100:32" and tuning.get("VECTOR_C4", False))
     for index, image in enumerate(request["images"]):
         signature[image["name"] + "_ptr"] = "*" + DEPTH_TO_TRITON[image["depth"]]
         if image.get("aligned16"):
             attrs[(index,)] = [["tt.divisibility", 16]]
+        if buffer32:
+            attrs.setdefault((index,), []).append(["tt.pointer_range", 32])
     for offset, param in enumerate(request["params"]):
         if param["type"] == "constexpr":
             signature[param["name"]] = "constexpr"
@@ -173,7 +179,7 @@ def compile_kernel(request, tuning, num_warps, grid, num_stages=1):
                                target.arch, type(backend).__module__)
     options = {"num_warps": num_warps, "num_stages": num_stages}
     kernel = request["kernel"]
-    if (kernel in ("warp_perspective", "remap") or
+    if (kernel in ("warp_perspective", "warp_perspective_c4", "remap") or
             kernel.startswith(("warp_affine_", "resize_", "cvtcolor",
                                "threshold_select", "gaussian_", "filter2d_"))):
         # The CPU reference rounds each uncontracted arithmetic operation.

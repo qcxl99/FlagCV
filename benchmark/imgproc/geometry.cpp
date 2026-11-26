@@ -144,7 +144,8 @@ const Case cases[] = {
 
 void measure_case(flagcv::Handle& handle, const flagcv_test::Stream& stream, const Case& item) {
   const int w = item.width, h = item.height;
-  Image src(h, w, item.type, 3, 2, 5), dst(h, w, item.type, 5, 3, 2);
+  const int output_padding = item.id == "perspective-4k-cubic-replicate" ? 3 : 2;
+  Image src(h, w, item.type, 3, 2, 5), dst(h, w, item.type, 5, 3, output_padding);
   fill(src, dst);
   src.upload(stream.value);
   dst.upload(stream.value);

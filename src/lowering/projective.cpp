@@ -50,15 +50,20 @@ LoweredOp geometry(const char* kernel, const GpuMat& src, const GpuMat& dst) {
 }
 
 void add_sampling(LoweredOp& op, Interpolation interpolation, Border border,
-                  const BorderValue& values) {
+                  const BorderValue& values, bool hint_strides = false) {
   const auto& s = op.images[0];
   const auto& d = op.images[1];
   op.add_param("src_h", s.height);
   op.add_param("src_w", s.width);
   op.add_param("dst_h", d.height);
   op.add_param("dst_w", d.width);
-  op.add_param("src_rs", s.row_stride);
-  op.add_param("dst_rs", d.row_stride);
+  if (hint_strides) {
+    op.add_hinted_param("src_rs", s.row_stride);
+    op.add_hinted_param("dst_rs", d.row_stride);
+  } else {
+    op.add_param("src_rs", s.row_stride);
+    op.add_param("dst_rs", d.row_stride);
+  }
   constexpr const char* names[] = {"bv0", "bv1", "bv2", "bv3"};
   for (std::size_t channel = 0; channel < values.size(); ++channel) {
     double value = values[channel];
@@ -121,6 +126,19 @@ LoweredOp lower_warp_perspective(const GpuMat& src, const GpuMat& dst,
                            std::int64_t{src.width()} * src.channels() * depth_size(src.depth());
   if (source_span > index_limit)
     throw std::invalid_argument("warpPerspective source exceeds SIMD byte offset range");
+  const auto& source = op.images[0];
+  const auto& destination = op.images[1];
+  const auto destination_row_bytes =
+      std::int64_t{dst.width()} * dst.channels() * depth_size(dst.depth());
+  const bool bounded_destination = destination_row_bytes <= index_limit &&
+      dst.height() - 1 <= (index_limit - destination_row_bytes) / dst.row_pitch();
+  const bool vector_c4 = source.depth == Depth::k32F && source.channels == 4 &&
+                         interpolation == Interpolation::kCubic && border == Border::kReplicate &&
+                         destination.width == 3840 && destination.height == 2160 &&
+                         bounded_destination &&
+                         source.address % 16 == 0 && destination.address % 16 == 0 &&
+                         source.row_stride % 16 == 0 && destination.row_stride % 16 == 0;
+  if (vector_c4) op.kernel = "warp_perspective_c4";
   const auto sampling = sampling_matrix(matrix, inverse_map);
   constexpr const char* names[] = {
       "m00", "m01", "m02", "m10", "m11", "m12", "m20", "m21", "m22"};
@@ -130,7 +148,7 @@ LoweredOp lower_warp_perspective(const GpuMat& src, const GpuMat& dst,
       throw std::invalid_argument("warpPerspective sampling coefficients exceed finite float range");
     op.add_fp32_param(names[i], static_cast<float>(value));
   }
-  add_sampling(op, interpolation, border, border_value);
+  add_sampling(op, interpolation, border, border_value, vector_c4);
   return op;
 }
 

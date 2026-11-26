@@ -268,6 +268,28 @@ def _sample_cubic(src, dst, x, y, ix, iy, ax, ay, all_out, inner, src_h, src_w, 
 
 
 @triton.jit
+def _c4_pointer(base, offset):
+    return base + tl.multiple_of(offset, 4)[:, None] + tl.arange(0, 4)[None, :]
+
+
+@triton.jit
+def _c4_cubic_replicate(src, dst, x, y, ix, iy, ax, ay, h, w, src_rs, dst_rs, mask,
+                        BLOCK: tl.constexpr):
+    wx = _cubic_weights(ax)
+    wy = _cubic_weights(ay)
+    acc = tl.full((BLOCK, 4), 0, tl.float32)
+    for r in tl.static_range(4):
+        sy = _border_index(iy + r, h, 1).to(tl.int64) * src_rs
+        row = tl.full((BLOCK, 4), 0, tl.float32)
+        for c in tl.static_range(4):
+            sx = _border_index(ix + c, w, 1).to(tl.int64) * 4
+            value = tl.load(_c4_pointer(src, sy + sx), mask[:, None], other=0)
+            row = row + value * wx[c][:, None]
+        acc = acc + row * wy[r][:, None]
+    tl.store(_c4_pointer(dst, y.to(tl.int64) * dst_rs + x * 4), acc, mask[:, None])
+
+
+@triton.jit
 def _project_cubic(x, y, m00, m01, m02, m10, m11, m12, m20, m21, m22):
     yd = y.to(tl.float32)
     xd = x.to(tl.float64)
@@ -304,7 +326,8 @@ def _perspective_column(column, width, BLOCK: tl.constexpr):
 def perspective_kernel(src_ptr, dst_ptr, m00, m01, m02, m10, m11, m12, m20, m21, m22,
                        src_h, src_w, dst_h, dst_w, src_rs, dst_rs, bv0, bv1, bv2, bv3,
                        CN: tl.constexpr, INTER: tl.constexpr, BORDER: tl.constexpr,
-                       BLOCK: tl.constexpr, COL_GRID_LIMIT: tl.constexpr):
+                       BLOCK: tl.constexpr, COL_GRID_LIMIT: tl.constexpr,
+                       VECTOR_C4: tl.constexpr = False):
     column = tl.program_id(1)
     if COL_GRID_LIMIT:
         column += tl.program_id(2) * COL_GRID_LIMIT
@@ -335,8 +358,12 @@ def perspective_kernel(src_ptr, dst_ptr, m00, m01, m02, m10, m11, m12, m20, m21,
                         inner = tl.where(x >= dst_w - 4, tail_inner, inner)
         else:
             outside = tl.full((), False, tl.int1)
-        _sample_cubic(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, outside, inner, src_h, src_w,
-                      src_rs, dst_rs, bv0, bv1, bv2, bv3, active, CN, BORDER, BLOCK)
+        if VECTOR_C4:
+            _c4_cubic_replicate(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, src_h, src_w,
+                                src_rs, dst_rs, active, BLOCK)
+        else:
+            _sample_cubic(src_ptr, dst_ptr, x, y, ix, iy, ax, ay, outside, inner, src_h, src_w,
+                          src_rs, dst_rs, bv0, bv1, bv2, bv3, active, CN, BORDER, BLOCK)
     else:
         xf = x.to(tl.float32)
         yf = y.to(tl.float32)

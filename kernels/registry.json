@@ -72,6 +72,11 @@
       "function": "perspective_kernel"
     },
     {
+      "name": "warp_perspective_c4",
+      "source": "common/projective.py",
+      "function": "perspective_kernel"
+    },
+    {
       "name": "remap",
       "source": "common/projective.py",
       "function": "remap_kernel"

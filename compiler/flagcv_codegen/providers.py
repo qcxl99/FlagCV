@@ -118,7 +118,11 @@ def plan_projective(request, facts):
     if col_limit:
         grid[1]["limit"] = col_limit
         grid[2] = {"product": ["dst_w"], "block": block * col_limit}
-    return {"BLOCK": block, "COL_GRID_LIMIT": col_limit}, warps, grid
+    tuning = {"BLOCK": block, "COL_GRID_LIMIT": col_limit}
+    if request["kernel"] in ("warp_perspective", "warp_perspective_c4"):
+        tuning["VECTOR_C4"] = (request["kernel"] == "warp_perspective_c4" and
+                               request["backend"] == "hip" and request["target"] == "hip:gfx1100:32")
+    return tuning, warps, grid
 
 
 def plan_resize(request, facts):
@@ -226,6 +230,7 @@ PLANS["filter2d_direct"] = plan_spatial_filter
 PLANS["filter2d_interior"] = plan_spatial_filter
 PLANS["filter2d_dense"] = plan_spatial_filter
 PLANS["warp_perspective"] = plan_projective
+PLANS["warp_perspective_c4"] = plan_projective
 PLANS["remap"] = plan_projective
 for mode in ("nearest", "linear", "cubic"):
     PLANS[f"warp_affine_{mode}"] = plan_warp_affine

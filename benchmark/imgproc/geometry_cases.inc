@@ -10,3 +10,4 @@
 {"remap-fhd-fixed-scatter",1920,1080,CV_MAKETYPE(CV_16U,3),1,1,false,2, {1,0,0,0,1,0,0,0,1}, "scatter"},
 {"remap-4k-cubic",3840,2160,CV_MAKETYPE(CV_32F,4),2,4,false,0, {1,0,0,0,1,0,0,0,1}, "local"},
 {"remap-fhd-transparent",1920,1080,CV_MAKETYPE(CV_8U,3),1,5,true,1, {1,0,0,0,1,0,0,0,1}, "outside"},
+{"perspective-4k-cubic-replicate",3840,2160,CV_MAKETYPE(CV_32F,4),2,1,true,-1, {1,0.009,-0.37,0.001,0.99,-0.29,0.000001,-0.000003,1}, "local"},

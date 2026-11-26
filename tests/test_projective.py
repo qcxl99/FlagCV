@@ -91,7 +91,7 @@ def provider_config(interpolation, border, channels, layout):
 
 
 def native_candidate(module, src, dst, interpolation, border, flag, coefficients=None,
-                     maps=(), layout=0, values=VALUES, block=None, warps=None):
+                     maps=(), layout=0, values=VALUES, block=None, warps=None, vector_c4=False):
     import triton
 
     height, width = dst.shape[:2]
@@ -108,6 +108,8 @@ def native_candidate(module, src, dst, interpolation, border, flag, coefficients
     grid = ((height, min(columns, limit), triton.cdiv(columns, limit))
             if limit else (height, columns, 1))
     if coefficients is not None:
+        if vector_c4:
+            constexprs["VECTOR_C4"] = True
         return lambda: module.perspective_kernel[grid](src, dst, *coefficients, *common, **constexprs)
     first, second = maps if len(maps) == 2 else (maps[0], maps[0])
     return lambda: module.remap_kernel[grid](src, dst, first, second, first.stride(0),

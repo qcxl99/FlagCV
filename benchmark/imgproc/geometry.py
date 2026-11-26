@@ -53,9 +53,10 @@ def wrap(array):
         h, w, cv2.CV_MAKETYPE(kind[array.dtype], channels),
         array.data_ptr(), array.stride(0) * array.element_size())
 
-def make_image(host, y, x):
+def make_image(host, y, x, row_alignment=1):
     rows, cols, channels = host.shape
-    view = torch.full((rows + 2 * y + 1, cols + 2 * x + 3, channels), 91,
+    pitch = triton.cdiv(cols + 2 * x + 3, row_alignment) * row_alignment
+    view = torch.full((rows + 2 * y + 1, pitch, channels), 91,
                        dtype=torch.from_numpy(host).dtype, device="cuda")
     image = view[y:y+rows, x:x+cols]
     image.copy_(torch.from_numpy(host))
@@ -81,9 +82,10 @@ def run(row):
     h, w = row["destination"]
     sh, sw = row["source"]
     host, initial = geometry.geometry_inputs((sh, sw, channels), (h, w, channels), depth, 294)
-    source, _ = make_image(host, 1, 3)
-    target, backing = make_image(initial, 2, 5)
-    native_target, _ = make_image(initial, 2, 5)
+    alignment = 4 if row.get("aligned_c4") else 1
+    source, _ = make_image(host, 1, 3, alignment)
+    target, backing = make_image(initial, 2, 5, alignment)
+    native_target, _ = make_image(initial, 2, 5, alignment)
     if layout < 0:
         matrix = tuple(map(float, row.get("matrix", geometry.GENERAL)))
         coefficients = matrix if flag else geometry.inverse_coefficients(matrix)
@@ -102,9 +104,24 @@ def run(row):
         maps, launch_layout = geometry.map_inputs(h, w, flag, layout, x_coord, y_coord)
     reference = geometry.cv_result(host, initial, inter, border, flag, matrix, maps)
     gmaps = tuple(make_image(m[:, :, None] if m.ndim == 2 else m, 1, 3)[0] for m in maps)
+    vector_c4 = False
+    alias_request = None
+    if (matrix is not None and depth == "float32" and channels == 4 and inter == 2 and border == 1
+            and (h, w) == (2160, 3840)
+            and all(t.data_ptr() % 16 == 0 and t.stride(0) % 16 == 0 and
+                    ((t.shape[0]-1) * t.stride(0) + t.shape[1] * 4) * t.element_size() <= 2**31 - 1
+                    for t in (source, target))):
+        images = [dict(name=name, depth="32F", channels=tensor.shape[2],
+                       aligned16=(tensor.data_ptr() % 16 == 0))
+                  for name, tensor in (("src", source), ("dst", target))]
+        req = live.request("warp_perspective_c4",
+                           [dict(name=k, value=v, type="constexpr") for k,v in
+                            {"CN":channels, "INTER":inter, "BORDER":border}.items()], images)
+        vector_c4 = live.plan(req)[0]["VECTOR_C4"]
+        alias_request = dict(kernel=req["kernel"], images=req["images"])
     candidate = geometry.native_candidate(
         kernels, source, target, inter, border, flag, coefficients=coefficients, maps=gmaps,
-        layout=launch_layout, values=geometry.constants(host.dtype, geometry.VALUES))
+        layout=launch_layout, values=geometry.constants(host.dtype, geometry.VALUES), vector_c4=vector_c4)
     compiled = candidate()
     validate(target, reference)
     guard = backing.cpu().numpy()
@@ -117,7 +134,9 @@ def run(row):
                   hash=compiled.hash, code_sha256=live.artifact(compiled), target=live.identity()["target"], block=block, num_warps=warps,
                   num_stages=compiled.metadata.num_stages,
                   enable_fp_fusion=compiled.metadata.enable_fp_fusion,
-                  grid=[h, min(tiles, limit), triton.cdiv(tiles, limit)])
+                  grid=[h, min(tiles, limit), triton.cdiv(tiles, limit)], vector_c4=vector_c4)
+    if alias_request:
+        launch["alias_request"] = alias_request
     if live.HIP or live.VERIFY_ONLY:
         return dict(id=row["id"], **live.candidate_only(launch, candidate, profile, options.profile))
     mode = (cv2.INTER_NEAREST, cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INTER_AREA)[inter]
