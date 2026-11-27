@@ -29,9 +29,10 @@ FlagCV compiles Triton kernels at runtime and accesses hardware through pluggabl
 | `iluvatar` | CUDA-compatible driver API (CoreX) |
 | `mthreads` | MThreads MUSA runtime |
 | `thead` | T-Head PPU driver API |
-| `ascend` | Unavailable. AscendCL integration is planned. |
+| `ascend` | AscendCL (planned) |
 
 See the [operator inventory](docs/operators.md) for current operators, validated devices, and preview backends.
+For SDK setup and device tests, see the [NVIDIA](docs/nvidia-validation.md) and [AMD/Hygon](docs/hip-validation.md) backend guides.
 
 ## Build and Test
 

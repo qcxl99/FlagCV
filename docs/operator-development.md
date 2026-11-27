@@ -1,7 +1,7 @@
 # 添加 Triton 算子及 C++ 调用链
 
 新增 Triton 算子时接入 C++ 接口、lowering、kernel registry 和编译计划。
-内部 Python 评测使用同一实现。
+内部 Python 评测使用同一 kernel、registry 和编译计划，不通过公开 C++ API 调用。
 C++ 接口与内存、stream 的约定见 [C++ operator interfaces](cpp-operators.md)。
 
 ## 调用链与文件位置
@@ -99,6 +99,10 @@ void bitwise_and(Handle& handle, const GpuMat& src1, const GpuMat& src2,
 }
 ```
 
+新增便利重载时，保持操作数和 stream 合同不变，传入
+`detail::currentHandle()` 取得的线程本地 Handle，直接调用显式重载。参考
+[bitwise.cpp](../src/core/bitwise.cpp)；不要另建 lowering、registry 或 launch 路径。
+
 runtime 按 `op.images` 的声明顺序生成设备参数。操作数校验留在 lowering，平台调优留在 provider。
 
 ## 4. Triton kernel：提供可编译的参数签名
@@ -193,11 +197,10 @@ ABI 规则。`identify()` 提供编译身份摘要，包含 registry、直接源
 C++ 精度测试通过公开 API 调用，在 `tests/cpp` 接入 OpenCV CPU 参考和
 对应平台的显存、拷贝及 stream。Python 测试使用该算子的 OpenCV CPU 参考。
 按 dtype、通道、尺寸、pitch、ROI、mask、边界和 stream 建矩阵，单独比较输入
-与输出 guard 字节。将性能用例登记到 `workloads/`，并更新 Optest 元数据和
-算子清单。按 [性能测试](benchmark.md) 提交逐用例证据。
+与输出 guard 字节。按[性能测试](benchmark.md)收集受影响路径的逐用例证据，并
+更新[算子清单](operators.md)。
 
-完整检查和复跑见 [NVIDIA 验收](nvidia-validation.md)，合入要求见
-[FlagCV 合入标准](../CONTRIBUTING.md)。
+复跑见[测试指南](testing.md)，合入要求见[贡献指南](../CONTRIBUTING.md)。
 
 ## 扩展 mask 和标量时的约定
 
@@ -210,6 +213,21 @@ mask 表示“不写”，被排除的目标像素保留原值。使用单通道
 不能直接套用会要求图像尺寸相等的 array-array lowering。
 
 ## 内部评测与候选注入
+
+1. 在 `reference/<op>.py` 实现独立的 OpenCV CPU 参考，用 `tests/test_<op>.py`
+   测试。在 [kernel candidate adapter](../helpers/kernel_candidate.py) 接入参数编码和
+   prepared launch，使 `--builtin` 按同一 registry、provider 和专门化编译，不为评测另写 kernel。
+2. 在 [统一 workload](../workloads/core.py) 登记 Core 配置，按
+   [workloads/add.py](../workloads/add.py) 提供 Python 输入构造，由 Python benchmark
+   和 baseline recipe 共用；C++ 从同一 Core 定义生成用例。参照
+   [add benchmark](../benchmark/test_add_benchmark.py) 接入 pytest marker 和公共 runner。
+3. 有等价的 OpenCV CUDA 比较器时，更新 bridge 和 Python adapter，并按
+   [baseline/add.py](../baseline/add.py) 接入 recipe。共用
+   [recipe helper](../baseline/__recipe.py) 的用例、配置和预分配输出的正确性预检；
+   不把语义或分配边界不等价的实现登记为原生比较器。
+4. 同步 [Optest 算子元数据](../conf/operators.yaml) 的算子 ID、pytest marker
+   （见 [pytest.ini](../pytest.ini)）与 recipe 名。用下方命令核对用例，适用时再按
+   [NVIDIA 指南](nvidia-validation.md#单算子原生基线采集)检查单算子采集。
 
 使用算子的 `@pytest.mark.OP` 选择工作负载和 OpenCV CPU 参考。
 `--builtin` 使用交付编译和分派配置。使用 `--override OP:FILE[:FUNCTION]`

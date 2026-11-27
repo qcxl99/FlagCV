@@ -1,38 +1,37 @@
 # Contributing to FlagCV
 
-欢迎提交缺陷修复、算子和平台改进。FlagCV 以独立 CMake 库、公开 C++ API、
-Triton kernel 和验证工具交付。
+## 开发
 
-## 贡献流程
+从主分支创建专题分支，说明问题、预期语义和受影响的平台。复用现有 lowering、
+registry 和公版 Triton kernel，厂商专用逻辑放在对应 backend。复用外部 kernel
+时记录来源版本、本地适配及语义核对。参见[算子开发指南](docs/operator-development.md)。
 
-1. 从主分支创建专题分支。缺陷修复记录复现方式，接口或平台变更先说明预期语义和支持范围。
-2. 按 [算子开发指南](docs/operator-development.md) 复用已有 lowering、registry 和公版 Triton kernel。厂商扩展及专用编译选项放在对应 backend。
-3. 运行 Host 检查及受改动影响的目标平台测试，更新 [支持清单](docs/operators.md)、接口说明和复现命令。
-4. 提交 PR 时附改动目的、受影响范围、实际测试命令、设备与工具链、结果链接及缺项。OpenCV 模块的合入遵循 [OpenCV 贡献流程](https://github.com/opencv/opencv/wiki/How_to_contribute)。
+## 代码风格
 
-## 按改动范围验收
+Python 用 `snake_case` 函数和变量名、`UPPER_CASE` 常量名；可用仓库的
+[Flake8 配置](.flake8)做本地检查。C++ 使用 C++17，沿用相邻文件风格：
+公开类名和类型名用 `PascalCase`，现有算子名与 OpenCV 风格 API 保持一致，
+内部 helper 通常用 `snake_case`。启用构建警告并优先维持现有接口约定。
 
-所有 PR 运行 [Host CI](.github/workflows/host.yml)。在本地可执行
-`python tools/check_merge.py --profile host --output /path/to/new-host-evidence`，
-覆盖无厂商 SDK 的构建、host 测试和迁移后的树外安装包消费。
+## 测试和性能
 
-| 改动范围 | 设备验收与评审重点 |
+[Host CI](.github/workflows/host.yml)在 PR 上运行。可用
+`python tools/check_merge.py --profile host --output /path/to/new-host-evidence`
+复跑无厂商 SDK 的测试和迁移安装消费；依变更范围补 [设备测试](docs/testing.md)：
+
+| 变更范围 | 必要验收 |
 | --- | --- |
-| 优化已有算子 | 用受影响平台的公开 API 和 Python 入口验证声明路径与边界。比较同设备、同用例、同测量协议的改动前后数据，保留逐例结果和回退理由。 |
-| 新增算子或扩大支持范围 | 补公开声明、lowering、registry／provider、独立参考和两种入口的实现及测试。更新算子清单及正确性、性能用例。更新 `workloads/` 和 Optest 元数据。 |
-| 公共 Runtime、Compiler、Cache 或打包 | 按受影响的平台和算子声明验证公开 API 及树外安装。覆盖首次编译、复用与应重新编译的条件、缓存隔离、失败传播、默认与外部 stream、调用方资源和稳态同步边界。影响设备绑定时补多卡正反例。 |
-| 新增或调整 Backend | 标识实测 SDK、编译器及设备。验证驱动加载和释放、设备和 stream、编译产物、平台实现优先与公版选择、已注册路径出错、树外使用及实际可用的性能对照。缺少实卡证据时保留预览状态。 |
+| 文档 | 核对链接、锚点和示例与源码；纯文档改动不需要设备报告。 |
+| 算子新增、修复或优化 | 覆盖声明的 C++ 和内部 Python 路径及边界，与 OpenCV CPU 核对；新增用例同步 workload、Optest 元数据和 [算子清单](docs/operators.md)。影响性能时附同卡、同协议前后对照。 |
+| Runtime、Compiler、Cache 或打包 | 按影响范围验证缓存首次编译、复用或失效、分派及错误传播、调用方资源及迁移安装；涉及设备绑定时覆盖多卡正反例。 |
+| Backend | 记录实际 SDK、编译器和设备；验证产物 ABI、平台优先与公版分派、已注册实现报错、设备/stream 生命周期及树外运行。缺设备验证时标明待复验。 |
 
-按 [数值容差规范](docs/numerical-tolerance.md) 与 OpenCV CPU 比较受影响的声明路径。明确整数和位操作的逐位要求、浮点阈值及参考例外。测量前确认正确性，按 [性能测试规范](docs/benchmark.md) 分别报告 Python kernel 和 C++ API 的同设备逐用例结果，保留原始数据、用例、同步边界和可比性限制。
+先按[数值规则](docs/numerical-tolerance.md)验证正确性，再按[计时协议](docs/benchmark.md)
+区分 Python kernel 与 C++ API 性能，说明输入域、比较来源和不可比项。
 
-共用 kernel 时优先复用符合公开语义的可移植 Triton 实现。记录来源版本和本地
-适配，确认签名、dtype、布局、边界与数值一致。FlagCV 通过自身 registry 和安装包
-定位 kernel，各交付项目分别验收公开接口、生产执行路径和性能。
+## Pull Request
 
-评审提交范围、源码身份、环境、执行日志、逐例结果和缺项说明。每个适用项都要能
-追到实际证据。单次 NVIDIA 验收只覆盖该设备、当前用例及执行路径，新增能力和其他
-平台需附相应验证。安装或功能失败、必要结果缺失应保留为待修，不写成通过。
-
-编译器、缓存或 Backend 变更时，保留直接证明分派、加载、复用与释放的
-测试证据。测试命令、协议和结果标准见 [功能验收](docs/testing.md)、
-[性能测试](docs/benchmark.md) 和 [算子清单](docs/operators.md)。
+用 PR 模板列出目标、改动、实际测试命令与结果。普通 PR 只需提供与改动相称的
+验证，不必附全套验收报告；扩大支持范围或改变公开执行路径时，链接对应候选、设备和
+工具链的证据。标记未验证或不适用项，不能把缺项写成通过。涉及 OpenCV 自身模块的
+提交遵循 [OpenCV 贡献流程](https://github.com/opencv/opencv/wiki/How_to_contribute)。

@@ -1,23 +1,21 @@
 # FlagCV Architecture
 
-FlagCV is an image processing library with OpenCV-shaped interfaces and
-FlagDNN-shaped multi-backend plumbing. The public API immediately enqueues one operator on a caller-owned native
-stream. The runtime invokes compilation on a cache miss.
+FlagCV exposes OpenCV-style C++ APIs and uses caller-managed image buffers.
+Each call submits an operator to a caller-owned native stream. The runtime
+invokes compilation on a cache miss.
 
 ## Layers
 
-```
-include/flagcv/        public C++ API (OpenCV-shaped)
+```text
+include/flagcv/        public C++ API (OpenCV-style)
       |
-src/core, src/imgproc  one source file per operator family
+src/core/              operator-family entry points
       |
 src/lowering           operands + params -> LoweredOp (validation lives here)
       |
 src/runtime            cache lookup, compile on miss, launch
-      |
-compiler/              out-of-process Triton compiler (Python)
-      |
-backends/<platform>/   dlopen'd plugin: context, module load, launch
+      |-- compiler/             out-of-process Triton compiler (Python)
+      `-- backends/<platform>/  dlopen'd plugin: context, module load, launch
 ```
 
 Each arrow is one-way. The core library links no vendor SDK and no Python; it
@@ -39,7 +37,7 @@ before compilation, not discovered during it.
 
 ## Compile and launch path
 
-```
+```text
 flagcv::flip(handle, src, dst, code)
   lower_flip()                       validate, build LoweredOp
   launch()                           cache key -> Handle's kernel cache
@@ -104,43 +102,17 @@ relative to libflagcv, else the source tree it was built from. Plugins are found
 
 ## Scratch ABI qualification
 
-The NVIDIA provider checks the pinned FlagTree NVIDIA installation and its
-Triton 3.6.0 module path. The compiler checks that both scratch allocation sizes are present and
-zero. It also verifies the emitted PTX entry layout against the Runtime
-signature, including the two trailing 64-bit pointer parameters. The Runtime
-compares that count with the backend expectation before loading the binary.
+FlagCV does not provision kernel scratch buffers. A qualified provider must
+verify the artifact's argument layout and show that no scratch storage is
+required. The compiler reports the verified trailing scratch argument count;
+the runtime rejects a mismatch with the plugin's ABI before loading the
+artifact. The runtime passes null pointers for the qualified unused slots.
+Internal Python evaluation shares registry, specialization and provider
+validation, but launches through the selected FlagTree distribution.
 
-The AMD and Hygon plugins accept separate bounded Triton 3.6.0 compiler/target sets
-(gfx936, gfx938 and gfx1100). Both qualified compiler families emit two
-trailing pointer slots. FlagCV validates their LLVM entry signature and
-checks that both pointers have the `readnone` attribute. The profile scratch
-size must be explicitly zero. Some HIP compilers omit the global size, so
-the unused-pointer proof is required per artifact. An explicit nonzero size
-is rejected. Platform delivery status also requires on-device correctness
-and installation evidence.
-
-Iluvatar, MThreads, T-Head and Ascend need their exact compiler build,
-emitted argument layout, scratch metadata semantics and an on-device public API
-test before enabling native launch. Ascend is excluded from C++ builds until
-its device lifecycle is qualified. Its source rejects Handle creation without
-initializing AscendCL, changing the active device or acquiring device resources.
-Internal Python evaluation compiles through the same provider, registry and
-specialization. Its launcher is supplied by the selected FlagTree distribution.
-Current NVIDIA offline and device status is recorded in [NVIDIA validation](nvidia-validation.md).
-
-The process-group cleanup follows the approach in
-[FlagDNN's compiler client](https://github.com/flagos-ai/FlagDNN/blob/a84bcc18a172fa01597d2fc171ce3af680f3074a/src/runtime/compiler_client.cpp#L671).
-CUDA validation checks the PTX emitted by the installed FlagTree compiler.
-
-## Ascend enablement
-
-Before enabling the backend, verify that two Handles can use the caller's
-existing context, buffers and native stream. Check that destroying either
-Handle preserves the other Handle, the caller's context and stream, and
-ongoing work. FlagCV must release only its owned module registrations while
-the application retains device reset and AscendCL finalization. Verify the
-error path for a mismatched context or device and the supported CANN/FlagTree
-artifact ABI on the target device.
+See the [NVIDIA](nvidia-validation.md#scratch-abi) and
+[AMD/Hygon](hip-validation.md#scratch-abi) artifact checks and the
+[platform inventory](operators.md#平台支持范围) for qualification status.
 
 ## Units: pitch vs stride
 
@@ -162,9 +134,12 @@ folding the mask into the store predicate, never with
 
 ## Memory ownership
 
-FlagCV never allocates or frees device memory. `GpuMat` is a non-owning view
-over a buffer the caller owns — unlike `cv::cuda::GpuMat`, which owns its
-data. The caller keeps all buffers, the stream and the Handle alive until the enqueued work completes.
+`flagcv::GpuMat` is a non-owning view; FlagCV does not allocate or free the
+caller's image buffers. This is an ownership contract for FlagCV, not a claim
+about OpenCV's `cv::cuda::GpuMat`, which can also wrap external memory.
+Keep all buffers, the stream and the Handle alive until queued work completes.
+Use separate Handles for simultaneous calls from different host threads.
+See [C++ operator interfaces](cpp-operators.md) for overlap and operand rules.
 
 ## Plugin boundary
 
@@ -172,42 +147,22 @@ Plugins use the ABI in `backends/backend.hpp` and may share internal helpers
 in `backends/common`. They receive operand layouts and params as plain data
 and do not include core internal headers.
 
-### Backends
-
-| `FLAGCV_BACKENDS` | SDK | Artifact | Warp | Note |
-|---|---|---|---|---|
-| `nvidia` | `cuda.h` | `.cubin` | 32 | |
-| `iluvatar` | CoreX `cuda.h` | `.cubin` | 64 | needs `CUDAToolkit_ROOT` pointed at CoreX |
-| `amd` | `hip/hip_runtime.h` | `.hsaco` | 32 | AMD ROCm |
-| `hygon` | `hip/hip_runtime.h` | `.hsaco` | 64 | Hygon DTK |
-| `mthreads` | `musa.h` | `.mubin` | 32 | Triton backend name is `mtgpu` |
-| `thead` | `hggc.h` | `.hgbin` | 32 | Triton backend name is `PPU` |
-| `ascend` (unavailable) | `acl/acl.h`, `rt.h` | `.npubin` | 1 | preview source, excluded from C++ builds |
-
-The module-based plugins share `backends/common/driver_backend.hpp`:
-their driver APIs have the CUDA shape (init, primary context, push/pop, load
-module from bytes, get function, launch with an argument array), so a plugin
-is just an `Api` struct naming its own calls. Ascend does not have that shape
-— it registers the binary with the runtime and passes a packed argument
-buffer — so it implements the table itself and sets
-`appends_scratch_args = 0` in the preview code. This is a provisional ABI
-expectation and must be verified against the target CANN/FlagTree build before
-enabling Ascend.
-
-AMD and Hygon share the internal HIP driver and thread-local device binding.
-Their plugins resolve the SDK independently in separate build trees. Their
-backend names, providers, registries and published artifact paths are distinct.
+Module-based drivers can share [driver helpers](../backends/common/driver_backend.hpp)
+for context binding, module loading and launch. AMD and Hygon share internal
+HIP driver helpers, but resolve SDKs independently and keep separate backend
+names, providers, registries and artifact paths.
 
 The plugin also reports the compile target (`cuda:90:32`, `hip:gfx936:64`,
 ...) and the Triton backend name, which is what lets the compiler process
 build for a device it never touches. Each platform provider defines its artifact format, Triton backend name,
 element-block limits and artifact validation.
 
-The [operator inventory](operators.md) and [HIP validation](hip-validation.md)
-track which device/toolchain combinations have native evidence. Plugin
-buildability and offline ABI checks are recorded separately.
+The [platform inventory](operators.md#平台支持范围) distinguishes plugin
+availability, offline ABI checks and device evidence. See the [backend source](../backends)
+for the actual SDK and provider definitions.
 
 The runtime and provider split follows the FlagDNN approach. Python operator
 evaluation retains the case, candidate and JSON interfaces used by FlagGems.
-[FlagDNN](https://github.com/flagos-ai/FlagDNN) ·
+[FlagDNN](https://github.com/flagos-ai/FlagDNN) (including the
+[compiler-client cleanup](https://github.com/flagos-ai/FlagDNN/blob/a84bcc18a172fa01597d2fc171ce3af680f3074a/src/runtime/compiler_client.cpp#L671)) ·
 [FlagGems](https://github.com/flagos-ai/FlagGems)

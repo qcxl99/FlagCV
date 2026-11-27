@@ -1,120 +1,79 @@
-# HIP 交付验收
+# AMD/Hygon Backend Guide
 
-`amd` 对应 ROCm 的 gfx1100 wave32，`hygon` 对应 DTK 的 gfx936/gfx938 wave64。
-公开选择使用厂商名。旧的 `Handle("hip")` 与 `FLAGCV_BACKENDS=hip` 会报错，
-已有调用方需显式迁移。Triton target 仍采用 `hip:架构:波宽`。插件保留原
-Handle、GpuMat、Stream 和调用线程设备恢复契约。
+公开后端名为 `amd`（ROCm）和 `hygon`（DTK）；`Handle("hip")` 和
+`FLAGCV_BACKENDS=hip` 不再接受。两端分别使用对应 SDK 的 `hip::host`、
+独立构建树和匹配的 FlagTree。Triton target 仍使用 `hip:架构:波宽`。
+已验证的设备、工具链及功能范围见[平台支持清单](operators.md#平台支持范围)。
 
-## 拆分版历史记录
+## 构建和测试
 
-以下六算子拆分证据基于 `e48810e`。各平台使用单张可见设备和对应 SDK。
-
-| 平台 | 六算子验证 |
-| --- | --- |
-| AMD W7900D gfx1100 / ROCm 7.2.4 | 公开 C++ 矩阵、Python 128/128、迁移包树外消费。 |
-| Hygon BW1000 gfx936 / DTK 26.04 | 公开 C++ 矩阵和安装 Python 122/122 从拆分版本 00599d9 继承；e48810e 迁移消费实测通过。 |
-| Hygon BW1101 gfx938 / DTK 26.10 | 公开 C++ 184/184、安装 Python 128/128、迁移包消费与流验证。 |
-
-BW1000 的继承依据为两个版本的 GPU 分派、算子源码与全部已登记 target
-计划相同。该表限定本次验证的设备与工具链。没有新增多卡或性能测量。
-
-## 复跑
-
-选空闲卡并按物理设备取得锁，记录 PCI、GPU 身份、SDK、FlagTree 和
-OpenCV CPU 构建。每个候选独立使用编译输出与缓存。通过 `hip_DIR` 选择对应 SDK 的 CMake 配置，ROCm 和 DTK 分别使用
-实际 SDK 的 `hip::host`。将 `OPENCV_CMAKE_DIR` 指向 OpenCV 5 core
-的构建或安装目录。Python 测试需要同构建可导入的 `cv2`。
+在设备测试前选择对应 SDK 和 FlagTree，隔离可见设备、构建输出和缓存。
+`OPENCV_CMAKE_DIR` 指向 OpenCV 5 core 的 CMake 配置目录；Python 功能验证
+另需可导入的 CPU `cv2` 和对应 SDK 的 PyTorch 环境。
 
 ```sh
-# Hygon DTK SDK
-cmake -S . -B build-hygon -DCMAKE_BUILD_TYPE=Release \
-  -DFLAGCV_BACKENDS=hygon -DFLAGCV_TEST_HYGON=ON \
-  -Dhip_DIR="$DTK_HIP_CMAKE_DIR" -DOpenCV_DIR="$OPENCV_CMAKE_DIR"
-cmake --build build-hygon --parallel
-ctest --test-dir build-hygon -L host --output-on-failure
-ctest --test-dir build-hygon -L hygon --output-on-failure
-GEMS_VENDOR=hygon python -m pytest -q tests/test_*.py --builtin --device cuda:0
-
-# AMD ROCm SDK
 cmake -S . -B build-amd -DCMAKE_BUILD_TYPE=Release \
-  -DFLAGCV_BACKENDS=amd -DFLAGCV_TEST_AMD=ON \
+  -DFLAGCV_BACKENDS=amd -DFLAGCV_BUILD_TESTS=ON -DFLAGCV_TEST_AMD=ON \
   -Dhip_DIR="$ROCM_HIP_CMAKE_DIR" -DOpenCV_DIR="$OPENCV_CMAKE_DIR"
 cmake --build build-amd --parallel
 ctest --test-dir build-amd -L host --output-on-failure
 ctest --test-dir build-amd -L amd --output-on-failure
 GEMS_VENDOR=amd python -m pytest -q tests/test_*.py --builtin --device cuda:0
+
+cmake -S . -B build-hygon -DCMAKE_BUILD_TYPE=Release \
+  -DFLAGCV_BACKENDS=hygon -DFLAGCV_BUILD_TESTS=ON -DFLAGCV_TEST_HYGON=ON \
+  -Dhip_DIR="$DTK_HIP_CMAKE_DIR" -DOpenCV_DIR="$OPENCV_CMAKE_DIR"
+cmake --build build-hygon --parallel
+ctest --test-dir build-hygon -L host --output-on-failure
+ctest --test-dir build-hygon -L hygon --output-on-failure
+GEMS_VENDOR=hygon python -m pytest -q tests/test_*.py --builtin --device cuda:0
 ```
 
-分别安装到独立前缀，再迁移安装目录。用 `tests/consumer` 编译树外示例。
-Hygon 设置 `FLAGCV_CONSUMER_HYGON=ON`，AMD 设置 `FLAGCV_CONSUMER_AMD=ON`。
-将 `CMAKE_PREFIX_PATH` 指向对应的迁移前缀，并选择相同 SDK 的 `hip_DIR`。
-运行树外示例与公开 API 矩阵，核对实际加载的
-Runtime、HIP 插件和编译数据来自该前缀。合入证据包含 C++ 六个算子的
-OpenCV CPU 参考、数值例外、缓存、流与资源验证、拒绝用例以及
-workload 和原始结果。HIP 编译阶段检查输出的 ABI，规则见
-[Scratch ABI](architecture.md#scratch-abi-qualification)。仅完成离线编译的卡
-仍需实际设备验收。
+## 树外消费
 
-性能报告注明是否测 Python kernel 或公开 C++ API、计时和同步边界、
-原生比较器的语义及分配边界。同卡有 ATen 等价实现时可配对。不可比的
-路径分别标明原因。结果不能跨卡作为优化前后比值。
+安装到独立前缀，迁移后用 `tests/consumer` 构建。以 AMD 为例：
+
+```sh
+cmake --install build-amd --prefix "$AMD_STAGE"
+mv "$AMD_STAGE" "$AMD_PREFIX"
+cmake -S tests/consumer -B build-consumer-amd -DCMAKE_PREFIX_PATH="$AMD_PREFIX" \
+  -DFLAGCV_CONSUMER_NVIDIA=OFF -DFLAGCV_CONSUMER_AMD=ON \
+  -Dhip_DIR="$ROCM_HIP_CMAKE_DIR"
+cmake --build build-consumer-amd --parallel
+./build-consumer-amd/flagcv_install_consumer
+```
+
+以上目录应为新的绝对路径。Hygon 用独立的构建/安装目录、
+`FLAGCV_CONSUMER_HYGON=ON` 和 DTK 的 `hip_DIR`，不同时启用 AMD。
+核对加载的 Runtime、插件和编译数据均来自迁移前缀。需要同时检查公开 C++ API、
+安装包和性能时，使用 `tools/check_merge.py --profile amd` 或 `--profile hygon`，
+传入对应的 `--hip-dir`、`--opencv-dir` 和新的 `--output` 目录。
 
 ## Python 原生比较覆盖
 
-`--baseline auto` 的 `aten_hip_out` 目前仅在核实为 Hygon BW1000
-（`BW`, `gfx936`, 80 CU）的设备上启用。资格按实际 operand、布局、无别名、
-候选的预分配 current-stream launch 边界和运行时验证判断，不再限制固定尺寸、
-候选来源或 Torch/HIP 精确版本。外部候选复用相同的 prepared launcher 时可入选，
-未验证执行边界的外部 callable 仍为 `pending`。逐例与 OpenCV CPU 核对；
-PyTorch、HIP、设备身份和具体候选来源写入报告。这不是 C++ API 的资格。
+`--baseline auto` 的 `aten_hip_out` 仅在核实为 Hygon BW1000（`BW`、`gfx936`、
+80 CU）的设备上启用。合格域是同卡、同形状、紧凑单通道、无掩码的 `uint8`
+AND/NOT 和 `float32` add/subtract/单位缩放 multiply。操作数须有独立存储、零
+storage offset 和 16 字节对齐的基地址。逐例与 OpenCV CPU 核对；候选须在当前
+stream 上写入预分配输出。外部候选可复用合格的 prepared launcher；未经验证的
+callable 边界或域外的 `out=` 用例仍为 `pending`。见 [ATen adapter](../adapters/aten_hip.py)。
+运行验证或计时失败为 `failed`。`uint8` 算术回绕而非饱和，`torch.flip` 会分配
+输出，均不等价。这是 Python 比较资格，不是 C++ API 资格。
 
-BW1000 / PyTorch 2.9.0 / HIP 6.3.26045 上对下表五类合格算子，各取首尾
-Core 和额外 63×129 共 15 对；实卡 trace 对每个实现只观察到一次 kernel launch，
-同卡同一非默认 stream，计时调用内无分配、拷贝或同步。
+W7900D 和 BW1101 的 ATen 比较器未启用。没有合格原生比较时仍记录实测延迟；
+用 `--base-data PATH` 提供 Optest 外部基线，比较规则见[性能测试](benchmark.md)。
+资源系数由 Optest 按实测维护，不将设备理论规格填入系数数据库。
 
-| HIP 用例 | `native_status` 及范围 |
-| --- | --- |
-| 同卡、紧凑单通道、无掩码和无别名的 `uint8` AND/NOT、`float32` add/subtract/unit-scale multiply | 验证成功为 `passed`；验证或计时出错为 `failed`，外部比值不改写正式失败。 |
-| 其它设备、未验证的 dtype、布局、掩码、multiply scale 或候选边界 | `pending`；已找到 `out=`，待验证。 |
-| `uint8` add/subtract/multiply | `not_equivalent`；普通 ATen 算术回绕，FlagCV 饱和。 |
-| flip | `not_equivalent`；直接 `torch.flip` 分配输出，没有合格的预分配比较器。 |
+## Scratch ABI
 
-BW1101 和 W7900D 未在此资格窗口复验，不启用。没有合格原生比较器时仍
-记录候选实测延迟；仅在外部比较满足既有换算条件时才记录正式等效比值。
+AMD 与 Hygon 使用独立且有界的 Triton 3.6.0 compiler/target 集合。
+[HIP 产物校验](../compiler/flagcv_codegen/scratch_abi.py)检查 LLVM 入口签名、
+两个尾部指针的 `readnone` 和显式为零的 profile scratch。部分 HIP 编译器省略
+global scratch 大小，此时仍须逐产物证明两指针未使用；非零 global scratch 被拒绝。
+通用合同见 [Scratch ABI qualification](architecture.md#scratch-abi-qualification)。
 
-## 六算子整改验证
+## 历史记录
 
-以下资格绑定整改候选 `fd6153c` 及各行设备和工具链。三端均实测双卡公开 API、
-原生 Stream、调用方设备状态恢复和迁移安装后的树外调用。
-
-| 平台 | 工具链 | 功能与安装 |
-| --- | --- | --- |
-| Hygon BW1000 `gfx936` | DTK 26.04、FlagTree `0.7.0+hcu3.6` | 六算子双卡 C++、Python 128/128、树外消费通过。 |
-| Hygon BW1101 `gfx938` | DTK 26.10、FlagTree `0.7.1a1+hcu3.6` | C++ 每卡 184/184、Python 128/128、树外消费通过。 |
-| AMD W7900D `gfx1100` | ROCm 7.2.4、FlagTree `0.7.0+amd3.6` | C++ 每卡 184/184、Python 128/128、树外消费通过。 |
-
-BW1000 复跑了同卡、同协议的整改前后 112 个 C++ Core 用例，并核对 92 个
-Python Core 用例与 C++ 分派。BW1101 和 W7900D 分别保存 112 个 C++ Core、
-3 组便利接口配对及 92 个 Python Core 的实测延迟。BW1101 的延迟属于共享卡
-观测。两端缺少可用的原生或等效性能基线，相关速度比留空。三端功能资格与外部
-性能基线状态分别记录。
-
-```sh
-HIP_VISIBLE_DEVICES=0,1 python tools/check_merge.py --profile hygon --devices 2 \
-  --hip-dir "$DTK_HIP_CMAKE_DIR" --opencv-dir "$OPENCV_CMAKE_DIR" \
-  --output /tmp/flagcv-bw1000
-```
-
-BW1101 规格参考为表内类型 8，`NMZ_BW1101_CU64_144G`，64 CU、
-144G、基础频率 1.20 GHz、标注 boost 1.35 GHz。
-
-| 规格表项目 | Base / Peak |
-| --- | ---: |
-| Matrix（TFLOPS） | 315 / 354 |
-| i8gemm（表头 TFLOPS） | 629 / 708 |
-| fp8gemm（表头 TFLOPS） | 629 / 708 |
-| Vector hgemm | 20 / 21 |
-| Vector i8gemm | 39 / 43 |
-
-向量列未单列单位。实际瓶颈、精度和测量口径匹配时才使用测量系数。
-三个 HIP 平台缺少合格换算系数时均保留实测延迟及可比的原始延迟比。
+[固定版本的 HIP 记录](https://github.com/qcxl99/FlagCV/blob/adc01fda1014a530f2a844ad28746829e46a2da0/docs/hip-validation.md)
+保留后端拆分与迁移证据、ATen 实卡 trace、`fd6153c` 验收结果及 BW1101 规格表；
+这些记录绑定原候选和协议，不代表其他组合已验证。

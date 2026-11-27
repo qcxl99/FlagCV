@@ -1,74 +1,76 @@
 # 性能测试
 
-`workloads/` 定义 Core 用例。C++ 构建生成 112 个 Core 用例，内部
-Python 和六个 Optest recipe 共用 92 个 Core 用例。Case ID 由规范化配置
-生成，包含算子、variant、dtype、shape、行距、布局、算子参数、别名、输出
-分配及输入域。计时协议独立记录。旧的 Python Case ID 可以继续用于
-`--case-id`，用例清单同时提供新旧 ID。
+## 运行 Python kernel benchmark
 
-## Python kernel
+从源码根目录运行。先选定对应后端、FlagTree 和一张可见设备，确保 Python
+环境可导入 `cv2`。`--builtin` 使用生产 registry、provider、编译签名和 launch
+plan；`--override` 注入的候选用于实验。候选先通过 OpenCV CPU 正确性检查，
+输出在计时前预分配。
 
-`--builtin` 复用 C++ registry、provider、编译签名和 launch plan。
-逐例记录编译器身份、产物哈希、variant、编译常量、warp 数和 grid。
-外部候选的报告标为实验数据。计时前用 OpenCV CPU 验证结果并预分配输出。
+```sh
+python -m pytest benchmark -m add --builtin --device cuda:0 \
+  --baseline auto --record json --output /tmp/flagcv-add.json
 
-默认使用 Optest collector 相同的非 Graph Triton Event 协议。
-`do_bench` 使用 25 ms 预热、100 ms 测量和 median。原地操作使用 5 次
-预热和 25 个 Event 样本，每次样本前在计时区外恢复实际改写的输入。
-有可比原生实现时交替测量三轮，保留双方逐轮耗时并各取中位数。
-`--benchmark-samples 1` 可用于筛选。`--benchmark-profile long` 使用
-1000 ms 预热、100 ms 测量和三轮配对。`--warmup` 和 `--iter` 改变
-非 Graph 时间预算，报告保留实际协议。
+python -m pytest benchmark -m add --builtin --device cuda:0 \
+  --baseline auto --base-data /path/to/op_flagcv_perf_baseline.json \
+  --record json --output /tmp/flagcv-add-with-baseline.json
+```
 
-`--baseline auto` 在 NVIDIA 运行等价的 OpenCV CUDA 比较器，并在
-[已验证的 HIP 用例](hip-validation.md#python-原生比较覆盖)使用 ATen `out=`。
-同设备结果使用 `latency`、`latency_base` 和 `speedup`。
-`--base-data PATH` 读入 Optest 数据，用独立 shape key 定位记录后核对
-完整配置、dtype 和计时协议。同尺寸但 flip code、mask 或布局不同的记录
-拥有各自的配置与标识。
+用 `--list-cases` 列出用例，或用 `--case-id` 选择其中一个；旧 Python Case ID
+仍可用。`--baseline none` 关闭原生比较，`--record json --output PATH` 保存结果。
+`--benchmark-samples 1` 可快速筛选，`--benchmark-profile long` 可增加预热。
+Core 用例来自 [workloads](../workloads/core.py)，Python benchmark 与 Optest recipe
+共用其中的 Python 子集。
 
-正式评价优先采用成功的同设备等价原生比较。原生运行失败时保留失败原因，
-可比的外部结果可供展示。默认 `normalization.basis=nvidia_reference`，
-按 NVIDIA 比较器实测的主导瓶颈选择同资源、同精度的实测系数，不要求目标侧
-再次 profiling。这是参考侧模型，不声称两端瓶颈一致。当前 collector 在与
-`do_bench` 一致的清缓存边界采集 NCU；只使用有依据的 DRAM 或标量 FP32。
-明确的 launch／缓存受限证据、多次调用的合并采样、主导资源不明确或缺必要
-计数器时不生成等效比值。DRAM 折算须有真实 DRAM 流量。工作集与 L2 容量
-关系用于说明适用范围。冷缓存采样中，工作集可放入 L2 本身不排除实测 DRAM
-访问。旧报告仍可核对原始比值。
-`--target-profile PATH` 可提供可选的双端诊断（`dual_profile`），在
-`cases[case_id]` 内保存 `vendor`、`chip`、`config`、`timing_protocol`、
-`resource_profile`（`source`、`cache_control: all`、可选 `exclusion`）和
-带 `T_us` 的 `per_kernel` 利用率（`U_cuda`、`U_tensor`、`U_mem`，单位 %）。
-计算资源还需 `resource_precision` 和 `resource_profile.precision_source`。目标测量
-存在但与参考不一致时不换算；没提供
-某个用例的诊断则仍可按参考换算。设备型号以实际属性核实，`OPTEST_TARGET_CHIP`
-只是调度标签；当前仅确认 Hygon `BW` / `gfx936` / 80 CU 对应 BW1000。
-系数为目标设备实测资源值除以实际 NVIDIA 基线设备实测资源值。外部原始比值
-除以该系数得到 `compared_speedup`。
-缺项保留 `base_miss_reason` 和可比的原始比值。汇总保留原生、等效、仅
-原始比值、缺失、不可比和失败的状态与分母。
-`tools/check_merge.py` 转发 `--base-data` 和 `--target-profile`，在
-`acceptance.json` 的 `python_comparisons` 写入逐例正式状态计数和按比较来源
-分组的比值与分母。C++ 原生状态另记为 `cpp_native_statuses`。
+## 原生与外部比较
 
-原生 0.90×、普通等效 80% 和关键算子等效 95% 用于评审差距和优先级。
-项目验收以正确性和报告完整性为门槛；性能数值只用于参考。
+- **原生**：`--baseline auto` 使用符合语义的同卡 OpenCV CUDA 对照，或
+  [已验证的 HIP ATen `out=` 用例](hip-validation.md#python-原生比较覆盖)。
+  同卡加速比为 `原生中位延迟 / FlagCV 中位延迟`。
+- **外部**：`--base-data` 读入 Optest 的 NVIDIA 实测基线，按 shape key 查找，
+  核对完整配置、dtype 和计时协议。原始比值为 `NVIDIA 基线延迟 / FlagCV 延迟`；
+  等效比值为 `原始比值 / 资源系数`，其中 `资源系数 = 目标实测资源值 / 实际 NVIDIA 参考设备实测资源值`。
 
-## C++ API
+正式评价优先使用通过的同卡原生比较。原生验证或计时失败单列，并保留原因；
+外部 fallback 只供展示，不会改写正式失败。无合格换算时保留实测延迟、可比的
+原始比值和缺失或不可比原因；汇总按来源与状态区分分母。
 
-`FLAGCV_BUILD_BENCHMARKS=ON` 独立构建 benchmark。每例预热编译缓存，
-完成 OpenCV CPU 正确性检查，然后使用预分配缓冲区和同一个原生 stream。
+默认依据参考端 NVIDIA 的实测主导资源，只使用同资源、同精度且有依据的 DRAM
+或标量 FP32 系数，不假定两端瓶颈相同。采集与 `do_bench` 使用一致的清缓存边界，
+DRAM 需有实际流量（工作集可放入 L2 并不排除冷缓存下的 DRAM 访问）。明确受
+launch 或缓存限制、合并采样多次调用、无法判断资源或缺必要计数器时不换算。可选
+`--target-profile PATH` 提供双端诊断；目标用例存在但与参考不匹配时不换算，未提供
+该用例诊断仍可按参考端计算。详细规则见[比较实现](../helpers/baseline.py)，采集见
+[NVIDIA 指南](nvidia-validation.md#单算子原生基线采集)。`tools/check_merge.py`
+也接受 `--base-data` 和 `--target-profile`。
 
-- Device Latency 使用 stream 上的设备 Event 覆盖单次执行。
-- API Latency 从 Host 单调时钟上的公开调用前计至该 stream 该次工作完成。
-  每次采样前排空该 stream。
-- 传入 `--diagnostics` 可同时采集 Host submit 和 batch。
-- `add`、`bitwise_not` 和 `flip` 的代表性小用例在同一 stream 对比两种公开接口。
+## Python 计时协议
 
-C++ 可报告绝对延迟、同设备历史版本对照及已验证等价的同设备原生对照。
-与改动前版本比较时使用同设备、用例、输入域和计时协议。Python 外部
-基线的资源系数仅用于 Python kernel 报告。
+默认非 Graph Triton Event `do_bench`：25 ms 预热、100 ms 测量，取 median。
+有合格原生对照时同卡交替测量三轮，保留逐轮耗时并各取中位数。`long` 使用
+1000 ms 预热、100 ms 测量、三轮配对；`--warmup` 和 `--iter` 可改非 Graph
+时间预算。原地路径使用 5 次预热和 25 个 Event 样本，在样本计时区外恢复输入。
+报告记录实际使用的协议；不同输入域或不同协议的结果不能直接相比。
 
-构建和证据命令见 [测试](testing.md)、
-[NVIDIA 验收](nvidia-validation.md) 和 [HIP 验收](hip-validation.md)。
+## C++ API benchmark
+
+按对应[后端指南](testing.md#设备测试)配置 SDK 与 OpenCV 5 core，在 CMake
+配置时加 `-DFLAGCV_BUILD_BENCHMARKS=ON` 并构建。以 NVIDIA 为例（AMD/Hygon
+使用对应目录和目标名）：
+
+```sh
+./build-nvidia/backends/nvidia/validation/flagcv_benchmark_nvidia 0 /tmp/flagcv-cpp.csv
+./build-nvidia/backends/nvidia/validation/flagcv_benchmark_nvidia 0 /tmp/flagcv-cpp-diag.csv 21 --diagnostics
+```
+
+每例先完成编译、预热和 OpenCV CPU 正确性检查，再用预分配缓冲区在同一 stream
+采样。Device Latency 用设备 Event 覆盖单次执行；API Latency 从 Host 公开调用前计至
+该 stream 上该次工作完成，采样前排空 stream。`--diagnostics` 另采 Host submit
+和 batch；`add`、`bitwise_not`、`flip` 的代表性小用例也对照显式 Handle 和便利接口。
+
+C++ 报告绝对延迟、同卡历史对照或已验证等价的同卡原生对照。前后对比使用同卡、
+同用例、同输入域和同协议。Python 外部基线的资源系数不用于 C++。原生 0.90×、
+普通等效 80% 和关键算子等效 95% 只是参考；验收以正确性与报告完整性为门槛。
+
+[原协议与比较细节归档](https://github.com/qcxl99/FlagCV/blob/adc01fda1014a530f2a844ad28746829e46a2da0/docs/benchmark.md)
+保留该修订的内部字段与用例统计。

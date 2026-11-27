@@ -1,17 +1,17 @@
-## 变更范围
+## Description
 
-<!-- 标明已有算子、新算子、公共 Runtime／Compiler／Cache、打包或平台 Backend。列出受影响的 API、算子和平台。 -->
+<!-- What problem does this PR solve? -->
 
-## 正确性与执行路径
+## Changes
 
-<!-- 附当前源码的 host CI、公开 C++ 和 Python 测试。注明数值参考及例外、实际加载与分派、边界以及失败传播的证据。 -->
+<!-- Summarize the changes and affected APIs, operators, or backends. -->
 
-## 性能与复现
+## Testing
 
-<!-- 分列 Python 和 C++ 同设备逐例数据及改动前对比，附设备、工具链、候选、workload 和计时边界。记录不可用的基线和有影响的回退。 -->
+<!-- List relevant commands, results, and any verification gaps. Include device/toolchain details when applicable. -->
 
-## 安装与评审
+## Performance (if applicable)
 
-<!-- 附树外安装验证、算子清单/文档变更、验证记录和未验证或不适用项的理由。 -->
+<!-- Link same-device, same-protocol results and note comparison limits, or mark N/A. -->
 
-合入清单见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+See the [contribution guide](../CONTRIBUTING.md) for scope-specific checks.
