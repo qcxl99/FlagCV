@@ -2,7 +2,7 @@
 
 公开后端名为 `amd`（ROCm）和 `hygon`（DTK）；`Handle("hip")` 和
 `FLAGCV_BACKENDS=hip` 不再接受。两端分别使用对应 SDK 的 `hip::host`、
-独立构建树和匹配的 FlagTree。Triton target 仍使用 `hip:架构:波宽`。
+独立构建目录和匹配的 FlagTree。Triton target 仍使用 `hip:架构:波宽`。
 已验证的设备、工具链及功能范围见[平台支持清单](operators.md#平台支持范围)。
 
 ## 构建和测试
@@ -29,9 +29,10 @@ ctest --test-dir build-hygon -L hygon --output-on-failure
 GEMS_VENDOR=hygon python -m pytest -q tests/test_*.py --builtin --device cuda:0
 ```
 
-## 树外消费
+## 安装与集成测试
 
-安装到独立前缀，迁移后用 `tests/consumer` 构建。以 AMD 为例：
+安装到独立目录，将安装目录移到新位置，再用 `tests/consumer` 中的示例验证第三方项目集成。
+以下命令以 AMD 为例。
 
 ```sh
 cmake --install build-amd --prefix "$AMD_STAGE"
@@ -45,7 +46,7 @@ cmake --build build-consumer-amd --parallel
 
 以上目录应为新的绝对路径。Hygon 用独立的构建/安装目录、
 `FLAGCV_CONSUMER_HYGON=ON` 和 DTK 的 `hip_DIR`，不同时启用 AMD。
-核对加载的 Runtime、插件和编译数据均来自迁移前缀。需要同时检查公开 C++ API、
+核对加载的 Runtime、插件和编译数据均来自新的安装目录。需要同时检查公开 C++ API、
 安装包和性能时，使用 `tools/check_merge.py --profile amd` 或 `--profile hygon`，
 传入对应的 `--hip-dir`、`--opencv-dir` 和新的 `--output` 目录。
 

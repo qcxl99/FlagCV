@@ -33,5 +33,5 @@ Python 的逐轮样本。新版 API Latency 需要以相同协议重测。
   CUDA 对照由 contrib `2f5682baba1a8a7fd363247cf072c0ec7424d83e` 的
   `cudaarithm` 提供。构建的额外模块版本标记为 dirty，对应工作区的 Triton
   集成文件，`cudaarithm` 源码树与该提交一致。
-- 安装包 smoke 的 Nsight Systems 记录了 1 次模块加载和 3 次 `flip_kernel`
-  GPU launch。两个分配和两次传输来自树外示例。耗时样本独立于跟踪。
+- 安装包集成测试的 Nsight Systems 跟踪记录了 1 次模块加载和 3 次 `flip_kernel`
+  启动。两次分配和两次传输来自第三方项目示例。耗时样本独立于跟踪。

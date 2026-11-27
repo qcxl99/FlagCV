@@ -21,10 +21,10 @@ C++ 目标由调用方预分配，与源图像同形状、同深度，支持 1�
 
 | 后端 / 设备 | 工具链与状态 |
 | --- | --- |
-| `amd` / W7900D | ROCm 7.2.4、FlagTree `0.7.0+amd3.6`、`gfx1100` wave32；已验证功能与树外安装，未启用 ATen 原生比较。 |
-| `hygon` / BW1000 | DTK 26.04、FlagTree `0.7.0+hcu3.6`、`gfx936` wave64；已验证功能与树外安装，ATen 仅在[限定 Python 域](hip-validation.md#python-原生比较覆盖)可用。 |
-| `hygon` / BW1101 | DTK 26.10、FlagTree `0.7.1a1+hcu3.6`、`gfx938` wave64；已验证功能与树外安装，ATen 原生比较待验证、未启用。 |
-| `nvidia` / H20 | 已完成固定 FlagTree 的 SM90 离线编译及 PTX Scratch ABI 检查；该工具链的实卡 launch、迁移安装、原生采集和新协议性能对照待完成。H800 是 collector 注册默认，不代表实测。 |
+| `amd` / W7900D | ROCm 7.2.4、FlagTree `0.7.0+amd3.6`、`gfx1100` wave32。功能及安装与集成测试已通过，未启用 ATen 原生比较。 |
+| `hygon` / BW1000 | DTK 26.04、FlagTree `0.7.0+hcu3.6`、`gfx936` wave64。功能及安装与集成测试已通过，ATen 仅在[限定 Python 域](hip-validation.md#python-原生比较覆盖)可用。 |
+| `hygon` / BW1101 | DTK 26.10、FlagTree `0.7.1a1+hcu3.6`、`gfx938` wave64。功能及安装与集成测试已通过，ATen 原生比较待验证、未启用。 |
+| `nvidia` / H20 | 已完成固定 FlagTree 的 SM90 离线编译及 PTX Scratch ABI 检查。该工具链的实卡运行、安装包迁移与集成、原生采集和新协议性能对照待完成。H800 是采集器的默认配置，实际设备以采集记录为准。 |
 | `iluvatar` | Preview：提供 CoreX 后端，原生执行待验证。 |
 | `mthreads` | Preview：提供 MUSA 后端，原生执行待验证。 |
 | `thead` | Preview：提供 PPU 后端，原生执行待验证。 |
@@ -32,7 +32,7 @@ C++ 目标由调用方预分配，与源图像同形状、同深度，支持 1�
 
 AMD/Hygon 功能范围绑定[历史验收所列候选与工具链](https://github.com/qcxl99/FlagCV/blob/adc01fda1014a530f2a844ad28746829e46a2da0/docs/hip-validation.md#六算子整改验证)：
 双卡公开 C++ API（含便利重载）、外部原生 stream、SDK 设备状态恢复、内部 Python
-和迁移后树外消费；功能验证不等于已具备性能基线。H20 的[旧协议记录](baselines/nvidia-h20-2026-11-25/README.md)
+和[安装包迁移与集成测试](testing.md#安装与集成测试)。性能基线需单独验证。H20 的[旧协议记录](baselines/nvidia-h20-2026-11-25/README.md)
 不替代固定 FlagTree 的设备验证。[AMD/Hygon 指南](hip-validation.md) · [NVIDIA 指南](nvidia-validation.md)。
 
 ### Preview 和 Planned 资格

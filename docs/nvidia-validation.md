@@ -37,7 +37,7 @@ CUDA_VISIBLE_DEVICES="$GPU_UUID" GEMS_VENDOR=nvidia \
   python -m pytest -q tests/test_*.py --builtin --device cuda:0
 ```
 
-从构建到迁移安装和性能的验证入口（另需 `cudaarithm`）见[测试指南](testing.md)：
+以下命令运行构建、[安装与集成测试](testing.md#安装与集成测试)和性能验证，另需 `cudaarithm`。
 
 ```sh
 CUDA_VISIBLE_DEVICES="$GPU_UUID" python tools/check_merge.py --profile nvidia \

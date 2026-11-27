@@ -17,14 +17,15 @@ Python 用 `snake_case` 函数和变量名、`UPPER_CASE` 常量名；可用仓�
 
 [Host CI](.github/workflows/host.yml)在 PR 上运行。可用
 `python tools/check_merge.py --profile host --output /path/to/new-host-evidence`
-复跑无厂商 SDK 的测试和迁移安装消费；依变更范围补 [设备测试](docs/testing.md)：
+复跑无需厂商 SDK 的功能测试，并执行[安装与集成测试](docs/testing.md#安装与集成测试)。
+按变更范围补充[设备测试](docs/testing.md#设备测试)。
 
 | 变更范围 | 必要验收 |
 | --- | --- |
 | 文档 | 核对链接、锚点和示例与源码；纯文档改动不需要设备报告。 |
 | 算子新增、修复或优化 | 覆盖声明的 C++ 和内部 Python 路径及边界，与 OpenCV CPU 核对；新增用例同步 workload、Optest 元数据和 [算子清单](docs/operators.md)。影响性能时附同卡、同协议前后对照。 |
-| Runtime、Compiler、Cache 或打包 | 按影响范围验证缓存首次编译、复用或失效、分派及错误传播、调用方资源及迁移安装；涉及设备绑定时覆盖多卡正反例。 |
-| Backend | 记录实际 SDK、编译器和设备；验证产物 ABI、平台优先与公版分派、已注册实现报错、设备/stream 生命周期及树外运行。缺设备验证时标明待复验。 |
+| Runtime、Compiler、Cache 或打包 | 按影响范围验证缓存首次编译、复用或失效、分派及错误传播、调用方资源，以及安装包迁移与集成。涉及设备绑定时覆盖多卡正反例。 |
+| Backend | 记录实际 SDK、编译器和设备，验证产物 ABI、平台优先与公版分派、已注册实现报错、设备和 stream 生命周期，以及示例程序能否通过安装包运行。缺设备验证时标明待复验。 |
 
 先按[数值规则](docs/numerical-tolerance.md)验证正确性，再按[计时协议](docs/benchmark.md)
 区分 Python kernel 与 C++ API 性能，说明输入域、比较来源和不可比项。

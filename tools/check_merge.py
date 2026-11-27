@@ -85,7 +85,7 @@ def validate(args):
         runtime = next((line.split("=>", 1)[1].strip().split(" (", 1)[0]
                         for line in ldd.splitlines() if "libflagcv.so" in line and "=>" in line), "")
         if package not in Path(runtime).resolve().parents:
-            raise ValueError("tree-out application did not link the relocated runtime")
+            raise ValueError("The integration test did not resolve the runtime from the relocated package")
         run("consumer", application, cwd=output)
 
         if backend:
