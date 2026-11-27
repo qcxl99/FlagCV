@@ -1,4 +1,4 @@
-# FlagCV 算子清单
+# FlagCV 算子与平台支持
 
 Python 评测当前为连续单通道输入。C++ 使用预分配同形状、同深度的目标，支持
 1–4 个交错通道和独立字节 pitch。各 ROI 可以位于同一显存分配中的不相交区域。
@@ -17,22 +17,20 @@ Python 评测当前为连续单通道输入。C++ 使用预分配同形状、同
 范围内。内部 Python Core 只列生产 kernel 的主要计时子集。功能测试另行
 覆盖 16F、mask、原地、非单位缩放及其他位运算深度。
 
-| 平台 | 当前整改验证 |
+## 平台支持范围
+
+| 平台 | 验证范围 |
 | --- | --- |
 | Hygon BW1000 | 双卡公开 API 与原生 Stream、内部 Python、迁移安装、Core 逐例性能与分派。 |
 | NVIDIA H20 | FlagTree SM90 离线编译与 scratch ABI。实卡和新性能采集待复验。 |
 | Hygon BW1101 | `fd6153c` 双卡公开 API、便利重载、原生 Stream、设备恢复、Python 与迁移安装通过。Core 延迟为共享卡观测。 |
 | AMD W7900D | `fd6153c` 双卡公开 API、便利重载、原生 Stream、设备恢复、Python 与迁移安装通过。Core 保留实测延迟。 |
+| Iluvatar（`iluvatar`） | 提供 CoreX backend，原生执行待资格验证。 |
+| MThreads（`mthreads`） | 提供 MUSA backend，原生执行待资格验证。 |
+| T-Head（`thead`） | 提供 PPU backend，原生执行待资格验证。 |
+| Ascend（`ascend`） | 保留后端源码，当前构建不启用。 |
 
 平台工具链与历史支持见 [NVIDIA 验收](nvidia-validation.md) 和
 [HIP 验收](hip-validation.md)。
 
-## 后续批次
-
-| 顺序 | 范围 | 状态 |
-| --- | --- | --- |
-| 1 | `bitwise_or`、`bitwise_xor`、`compare`、`min`、`max` | OR/XOR/min/max 有独立评测 PR 提案；公开 API 和验收待接入 |
-| 2 | `resize`、`warpAffine`、`warpPerspective`、`remap` | 优先复用已有 Triton 和 OpenCV 工作；按插值及边界模式建立 CPU 和 CUDA 基线 |
-| 3 | `cvtColor`、`GaussianBlur`、`filter2D`、`threshold` | 先登记支持的转换代码、通道、边界策略和参考样本；`cvtColor` 为性能重点 |
-
-AMD 新工具链与新设备继续按 HIP 交付流程验证。[AMD PR #3](https://github.com/flagos-ai/FlagCV/pull/3)
+新增工具链或设备按对应平台流程验证后登记。新增算子及原生对照的接入方式见 [算子开发指南](operator-development.md)。

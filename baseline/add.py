@@ -16,3 +16,5 @@ grid = _recipe.grid
 build_inputs = _recipe.build_inputs
 key_shape = _recipe.key_shape
 config = _recipe.config
+resource_descriptor = _recipe.resource_descriptor
+NATIVE_API = "FlagCV OpenCV CUDA bridge"

@@ -6,6 +6,7 @@ import pytest
 
 from helpers.baseline import comparison, external_result, summarize
 from helpers.benchmark_protocol import PROFILES
+from runtime.identity import identify
 from workloads.core import case_id, python_cases, shape_key
 
 PROTOCOL = PROFILES["default"].name
@@ -19,6 +20,9 @@ def fixture_data(tmp_path):
         cfg = row["config"]
         rows[shape_key(cfg)] = {row["dtype"]: {
             "config": cfg, "latency_ms": 0.004 + 0.001 * index, "timing_protocol": PROTOCOL,
+            "resource_profile": {"source": "ncu", "cache_control": "all", "metrics": ["fixture"],
+                                 "repetitions": 1, "kernel_duration_us": 6, "dram_bytes": 4096,
+                                 "working_set_bytes": 4096, "reference_l2_bytes": 2048},
             # The shorter kernel is compute-heavy. The weighted aggregate is memory-bound.
             "per_kernel": [{"T_us": 3, "U_mem": 90, "U_cuda": 40, "U_tensor": 0},
                            {"T_us": 1, "U_mem": 20, "U_cuda": 90, "U_tensor": 0}],
@@ -28,7 +32,7 @@ def fixture_data(tmp_path):
         "_environment": {"reference_chip": "H20", "hardware": {"gpu": {"name": "NVIDIA H20"}}},
         "_scaling_factors": {"reference_chip": "H20", "source_specs": "test-specs.json", "chips": [
             {"chip": "H20", "vendor": "nvidia", "measured": {"bandwidth_gbps": 1.0}},
-            {"chip": "BW1101", "vendor": "hygon", "measured": {"bandwidth_gbps": 0.50}},
+            {"chip": "BW1000", "vendor": "hygon", "measured": {"bandwidth_gbps": 0.50}},
         ]},
     }
     return tmp_path / "base.json", data, cases
@@ -50,7 +54,9 @@ def test_equal_shapes_keep_distinct_codes_and_configs(fixture_data):
     )
 
 
-@pytest.mark.parametrize("mismatch", ["none", "denominator", "precision", "config"])
+@pytest.mark.parametrize("mismatch", ["none", "reference_only", "denominator", "precision", "config",
+                                      "target_model", "working_set", "launch", "legacy", "factor", "cache",
+                                      "short", "dram_missing"])
 def test_requires_matched_measured_factor(fixture_data, mismatch):
     path, data, cases = fixture_data
     row = cases[0]
@@ -59,20 +65,50 @@ def test_requires_matched_measured_factor(fixture_data, mismatch):
         data["_scaling_factors"]["reference_chip"] = "H800"
     elif mismatch == "config":
         base["config"] = {**row["config"], "output": "allocated"}
+    elif mismatch == "working_set":
+        base["resource_profile"]["working_set_bytes"] = 1024
+    elif mismatch == "launch":
+        base["resource_profile"]["exclusion"] = "launch overhead dominates the measured call"
+    elif mismatch == "short":
+        base["resource_profile"]["kernel_duration_us"] = 1
+        base["per_kernel"] = [{"T_us": 1, "U_mem": 45, "U_cuda": 20, "U_tensor": 0}]
+    elif mismatch == "dram_missing":
+        base["resource_profile"]["dram_bytes"] = 0
+    elif mismatch == "legacy":
+        del base["resource_profile"]
+    elif mismatch == "factor":
+        data["_scaling_factors"]["chips"][1]["measured"]["bandwidth_gbps"] = float("inf")
+    elif mismatch == "cache":
+        del base["resource_profile"]["reference_l2_bytes"]
     resource = {"T_us": 5, "U_mem": 90, "U_cuda": 10, "U_tensor": 0}
     if mismatch == "precision":
         resource.update(U_mem=10, U_cuda=90)
     path.write_text(json.dumps(data))
-    target = {"vendor": "hygon", "chip": "BW1101"}
-    profile = {**target, "per_kernel": [resource], "timing_protocol": PROTOCOL, "config": row["config"]}
+    target = identify("hygon", {"name": "BW", "arch": "gfx936", "compute_units": 80, "l2_bytes": 2048},
+                      "BW1101" if mismatch == "target_model" else "BW1000")
+    profile = {**target, "per_kernel": [resource], "timing_protocol": PROTOCOL, "config": row["config"],
+               "resource_profile": {"source": "fixture", "cache_control": "all"}}
+    if mismatch in ("reference_only", "short", "working_set", "cache"):
+        profile = None
     result = external_result(path, row, 0.002, PROTOCOL, target, profile)
-    if mismatch == "none":
+    if mismatch in ("none", "reference_only", "short", "working_set", "cache"):
         assert result["compared_speedup"] == 4.0
         assert result["base_miss_reason"] is None
+        assert result["normalization"]["basis"] == ("dual_profile" if profile else "nvidia_reference")
+        if mismatch == "working_set":
+            assert result["normalization"]["working_set_fits_reference_l2"]
+            assert result["normalization"]["working_set_fits_target_l2"]
     else:
         assert result["compared_speedup"] is None
         assert result["base_miss_reason"]
         assert result["base_raw_speedup"] == (None if mismatch == "config" else 2.0)
+
+
+@pytest.mark.parametrize("name,arch,units", [("BW", "gfx938", 80), ("BW", "gfx936", 64),
+                                            ("BW1101", "gfx936", 80), ("unknown", "gfx936", 80),
+                                            ("BW", None, None)])
+def test_scheduler_label_is_not_device_identity(name, arch, units):
+    assert identify("hygon", {"name": name, "arch": arch, "compute_units": units}, "BW1000")["chip"] is None
 
 
 def test_successful_native_wins_and_failure_survives_display_fallback():

@@ -182,7 +182,8 @@ class Evaluation:
             def prepare(*args):
                 prepared = function.prepare(*args)
                 observed = self.observe(prepared, source)
-                observed.dispatch = prepared.dispatch
+                observed.dispatch = getattr(prepared, "dispatch", None)
+                observed.execution_boundary = getattr(prepared, "execution_boundary", None)
                 return observed
 
             invoke.prepare = prepare

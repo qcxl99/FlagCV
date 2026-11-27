@@ -18,11 +18,12 @@ def test_plain_aten_uint8_arithmetic_is_not_saturating(op, left, right, wrapped)
     operands = tuple(torch.tensor(number, dtype=torch.uint8) for number in (left, right))
     assert getattr(torch, op)(*operands, out=torch.empty_like(operands[0])).item() == wrapped
     for vendor in ("amd", "hygon"):
-        assert aten_hip.qualification(op, (), "torch.uint8", vendor, "builtin")[0] == "not_equivalent"
-        assert aten_hip.qualification(op, (), "torch.float32", vendor, "builtin")[0] == "pending"
+        assert aten_hip.qualification(op, (), "torch.uint8", vendor)[0] == "not_equivalent"
+        assert aten_hip.qualification(op, (), "torch.float32", vendor)[0] == "pending"
 
 
-def test_platform_gate_excludes_unverified_targets_and_builds():
+def test_platform_gate_excludes_unverified_targets_not_versions(monkeypatch):
+    monkeypatch.delenv("OPTEST_TARGET_CHIP", raising=False)
     properties = SimpleNamespace(name="BW", gcnArchName="gfx936:other", multi_processor_count=80)
     version = SimpleNamespace(hip="6.3.26045", git_version="275d08c233b2cf705e4b66d9f98f7590daae5cba")
     torch = SimpleNamespace(__version__="2.9.0", version=version,
@@ -34,18 +35,33 @@ def test_platform_gate_excludes_unverified_targets_and_builds():
         properties.gcnArchName = arch
         assert not aten_hip._qualified_platform("hygon", torch, cuda)
     properties.gcnArchName = "gfx936"
-    version.git_version = "unverified"
+    version.git_version = "different-build"
+    assert aten_hip._qualified_platform("hygon", torch, cuda)
+    monkeypatch.setenv("OPTEST_TARGET_CHIP", "BW1101")
     assert not aten_hip._qualified_platform("hygon", torch, cuda)
 
 
 def test_nonstandard_layout_stays_pending(monkeypatch):
     torch = pytest.importorskip("torch")
     monkeypatch.setattr(aten_hip, "_qualified_platform", lambda *args: True)
-    src, dst = [torch.empty((64, 64), dtype=torch.uint8) for _ in range(2)]
-    for operands, source in (((src.T, dst), "builtin"), ((src, src), "builtin"),
-                             ((src, dst), "override"), ((src, dst, dst), "builtin")):
-        assert aten_hip.qualification("bitwise_not", operands, "torch.uint8", "hygon", source)[0] == "pending"
-    assert aten_hip.qualification("flip", (), "torch.uint8", "hygon", "builtin")[0] == "not_equivalent"
+    src, dst = [torch.empty((63, 129), dtype=torch.uint8) for _ in range(2)]
+    assert aten_hip.qualification("bitwise_not", (src, dst), "torch.uint8", "hygon")[0] == "eligible"
+    for operands in ((src.T, dst), (src, src), (src, dst, dst)):
+        assert aten_hip.qualification("bitwise_not", operands, "torch.uint8", "hygon")[0] == "pending"
+    assert aten_hip.qualification("flip", (), "torch.uint8", "hygon")[0] == "not_equivalent"
+    lhs, rhs, out = [torch.empty_like(src, dtype=torch.float32) for _ in range(3)]
+    assert aten_hip.qualification("multiply", (lhs, rhs, out, 1.0), "torch.float32", "hygon")[0] == "eligible"
+    assert aten_hip.qualification("multiply", (lhs, rhs, out, 2.0), "torch.float32", "hygon")[0] == "pending"
+
+
+def test_external_candidate_uses_verified_launch_boundary_not_source(monkeypatch):
+    from helpers.launch_boundary import CURRENT_STREAM_OUT
+
+    monkeypatch.setattr(benchmark, "_check_stream_allocation", lambda fn, args: True)
+    assert not benchmark._aten_candidate_boundary(SimpleNamespace(source="override"), ())
+    assert not benchmark._aten_candidate_boundary(SimpleNamespace(source="builtin"), ())
+    assert benchmark._aten_candidate_boundary(SimpleNamespace(
+        source="override", execution_boundary=CURRENT_STREAM_OUT), ())
 
 
 @pytest.mark.parametrize("native_status", ["passed", "failed", "pending", "disabled"])
@@ -63,7 +79,9 @@ def test_native_path_preserves_latency_and_formal_status(monkeypatch, native_sta
     def candidate(src, dst):
         return torch.bitwise_not(src, out=dst)
 
-    candidate.source = "builtin"
+    candidate.source = "override"
+    monkeypatch.setattr(benchmark, "_aten_candidate_boundary", lambda *args: True)
+    monkeypatch.setattr(benchmark, "_check_stream_allocation", lambda *args: True)
 
     def time(function, operands, **kwargs):
         if operands[-1] is not args[-1] and native_status == "failed":

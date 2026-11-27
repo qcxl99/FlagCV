@@ -61,20 +61,22 @@ workload 和原始结果。HIP 编译阶段检查输出的 ABI，规则见
 
 ## Python 原生比较覆盖
 
-`--baseline auto` 只为已验证的 Hygon BW1000 (`BW`, `gfx936`, 80 CU)、
-PyTorch 2.9.0 指定构建 / HIP 6.3.26045 和 builtin Python kernel 启用
-`aten_hip_out`。七个 Core 尺寸的 `uint8` `bitwise_and` / `bitwise_not`
-均为单通道、无掩码、紧凑且不别名，使用预分配、同卡同 stream 的
-ATen `out=`；逐例与 OpenCV CPU 核对。实卡 trace 对每个实现只观察到
-一次 kernel launch，二者在同一非默认 stream，无计时区内分配、拷贝或同步。
-这不是 C++ API 的原生对照资格。
+`--baseline auto` 的 `aten_hip_out` 目前仅在核实为 Hygon BW1000
+（`BW`, `gfx936`, 80 CU）的设备上启用。资格按实际 operand、布局、无别名、
+候选的预分配 current-stream launch 边界和运行时验证判断，不再限制固定尺寸、
+候选来源或 Torch/HIP 精确版本。外部候选复用相同的 prepared launcher 时可入选，
+未验证执行边界的外部 callable 仍为 `pending`。逐例与 OpenCV CPU 核对；
+PyTorch、HIP、设备身份和具体候选来源写入报告。这不是 C++ API 的资格。
+
+BW1000 / PyTorch 2.9.0 / HIP 6.3.26045 上对下表五类合格算子，各取首尾
+Core 和额外 63×129 共 15 对；实卡 trace 对每个实现只观察到一次 kernel launch，
+同卡同一非默认 stream，计时调用内无分配、拷贝或同步。
 
 | HIP 用例 | `native_status` 及范围 |
 | --- | --- |
-| 上述 14 个 Core case，匹配设备与构建 | `passed`；逐例验证或计时出错则 `failed`，不以外部比值改写正式失败。 |
-| 其它设备/构建、dtype、布局、掩码或候选边界下的 AND/NOT | `pending`；已找到 `out=`，待验证。 |
+| 同卡、紧凑单通道、无掩码和无别名的 `uint8` AND/NOT、`float32` add/subtract/unit-scale multiply | 验证成功为 `passed`；验证或计时出错为 `failed`，外部比值不改写正式失败。 |
+| 其它设备、未验证的 dtype、布局、掩码、multiply scale 或候选边界 | `pending`；已找到 `out=`，待验证。 |
 | `uint8` add/subtract/multiply | `not_equivalent`；普通 ATen 算术回绕，FlagCV 饱和。 |
-| `float32` add/subtract/multiply | `pending`；已找到 `out=`，待核对语义及执行边界。 |
 | flip | `not_equivalent`；直接 `torch.flip` 分配输出，没有合格的预分配比较器。 |
 
 BW1101 和 W7900D 未在此资格窗口复验，不启用。没有合格原生比较器时仍

@@ -1,77 +1,63 @@
 # FlagCV
 
-FlagCV provides immediate-mode GPU image processing through OpenCV-shaped C++
-interfaces and a standalone runtime. The delivery covers add, subtract,
-multiply, bitwise AND, bitwise NOT, and flip. The public library uses caller-owned
-image memory and native streams. Triton compilation runs in a separate Python
-process. C++ is FlagCV's public interface. Python supports internal compilation,
-correctness evaluation and benchmarks.
+## About
 
-FlagCV is part of FlagOS. Kernel support, backend validation and the development
-queue are tracked in [the operator inventory](docs/operators.md). For a change
-to this standalone repository, use [the FlagCV merge requirements](CONTRIBUTING.md).
+FlagCV is part of [FlagOS](https://flagos.io/), a fully open-source system software stack designed to unify the model–system–chip layers and foster an open and collaborative ecosystem.
+
+FlagCV is a high-performance, cross-platform computer vision operator library implemented in the [Triton](https://github.com/triton-lang/triton) language. It aims to provide optimized implementations of common image processing operators, including color conversion, filtering, geometric transformations, and arithmetic operations, through OpenCV-style C++ APIs.
+
+Built on [FlagTree](https://github.com/flagos-ai/flagtree), FlagCV uses backend-neutral kernels and hardware-specific optimizations to accelerate computer vision workloads across diverse hardware platforms.
 
 ## Quick Start
 
 ### Requirements
 
-On Linux, the runtime build uses:
-
+- Linux
 - CMake 3.23+ and a C++17 compiler
-- Python 3.10+ for validation and a supported FlagTree distribution for GPU compilation. [FlagTree](https://github.com/flagos-ai/flagtree)
+- Python 3.10+ with the corresponding FlagTree distribution
+- SDK and toolchain for the selected hardware backend
 
-Plus the toolchain of the backend you build. `libflagcv` itself links no vendor SDK and no CUDA: it reaches the device only through a `dlopen`'d plugin, so selecting a backend never changes the core.
+FlagCV compiles Triton kernels at runtime and accesses hardware through pluggable backends. The core library is independent of vendor-specific SDKs.
+
+### Hardware Backends
 
 | `FLAGCV_BACKENDS` entry | Plugin links |
 |---|---|
-| `nvidia` | CUDA driver API (`CUDA::cuda_driver`) |
-| `iluvatar` | CUDA-compatible driver API (`CUDA::cuda_driver`) |
-| `amd` | AMD ROCm, gfx1100 wave32 |
-| `hygon` | Hygon DTK, gfx936/gfx938 wave64 |
-| `mthreads` | MUSA runtime |
-| `thead` | PPU driver API (`CUstream`), T-Head PPU SDK |
+| `nvidia` | CUDA driver API |
+| `amd` | ROCm HIP runtime |
+| `hygon` | DTK HIP runtime |
+| `iluvatar` | CUDA-compatible driver API (CoreX) |
+| `mthreads` | MThreads MUSA runtime |
+| `thead` | T-Head PPU driver API |
+| `ascend` | Unavailable. AscendCL integration is planned. |
 
-Iluvatar, MThreads and T-Head can be built with their SDKs and await
-native launch qualification.
-For Iluvatar, use `-DCUDAToolkit_ROOT=<corex>`.
+See the [operator inventory](docs/operators.md) for current operators, validated devices, and preview backends.
 
-C++ interface conventions and the call path are documented in
-[C++ operator interfaces](docs/cpp-operators.md).
+## Build and Test
 
-Ascend C++ is unavailable in this build. Selecting `ascend` in
-`FLAGCV_BACKENDS` fails at configure time. Enablement requires verification
-with an application-owned AscendCL context, buffers and stream.
-
-The AMD and Hygon plugins share internal module and stream code. Each plugin
-uses its own SDK, compiler provider, registry and device identity. See [HIP validation](docs/hip-validation.md) for the device matrix
-and [scratch ABI qualification](docs/architecture.md#scratch-abi-qualification)
-for the native launch boundary.
-
-## Build and test
+Select the backend through `FLAGCV_BACKENDS`:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFLAGCV_WARNINGS_AS_ERRORS=ON
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DFLAGCV_BACKENDS=nvidia \
+  -DFLAGCV_BUILD_TESTS=ON
+
 cmake --build build --parallel
-ctest --test-dir build -L host --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
 
-For a host-only check without a vendor SDK, use
-`python tools/check_merge.py --profile host --output /path/to/new-host-evidence`.
-The installed consumer uses the shared Runtime for automatic discovery of
-relocated plugins and data. Static linking can use `FLAGCV_DATA_DIR` and
-`FLAGCV_PLUGIN_DIR` to select those installed resources explicitly.
-
-See [testing](docs/testing.md) for build profiles and installed-consumer checks.
-
-### Use from C++
-
-Install, then point your project at the install prefix:
+Install FlagCV:
 
 ```sh
 cmake --install build --prefix /opt/flagcv
 ```
 
-The default shared library locates its installed backend plugins and kernel sources relative to its own location.
+This example runs the default test suite. See [Testing](docs/testing.md) for the host-only workflow, device tests, and benchmark instructions.
+
+### Use from C++
+
+FlagCV provides OpenCV-style C++ interfaces with explicit device selection and optional native streams.
 
 `CMakeLists.txt`:
 
@@ -80,7 +66,7 @@ cmake_minimum_required(VERSION 3.23)
 project(flip_demo LANGUAGES CXX)
 
 find_package(FlagCV REQUIRED)
-find_package(CUDAToolkit REQUIRED)  # only for cudaMalloc in this demo
+find_package(CUDAToolkit REQUIRED)
 
 add_executable(flip_demo main.cpp)
 target_link_libraries(flip_demo PRIVATE FlagCV::flagcv CUDA::cudart)
@@ -90,9 +76,7 @@ target_link_libraries(flip_demo PRIVATE FlagCV::flagcv CUDA::cudart)
 
 ```cpp
 #include <flagcv/flagcv.hpp>
-
 #include <cuda_runtime.h>
-
 #include <cstdio>
 
 int main() {
@@ -100,20 +84,22 @@ int main() {
   unsigned char host[] = {1, 2, 3, 4,
                           5, 6, 7, 8};
 
-  // FlagCV never allocates device memory: the caller owns both buffers.
+  cudaSetDevice(0);  // Select the CUDA device for the caller's allocations.
+  flagcv::setDevice("nvidia", 0);  // Select FlagCV's logical device.
+
   void *src = nullptr, *dst = nullptr;
   cudaMalloc(&src, sizeof(host));
   cudaMalloc(&dst, sizeof(host));
   cudaMemcpy(src, host, sizeof(host), cudaMemcpyHostToDevice);
 
-  flagcv::setDevice("nvidia", 0);
   flagcv::GpuMat in(src, width, height, flagcv::Depth::k8U, 1);
   flagcv::GpuMat out(dst, width, height, flagcv::Depth::k8U, 1);
-  flagcv::flip(in, out, 1);  // 1: mirror columns, 0: rows, -1: both
 
-  // flip is enqueued on the default stream; this copy waits for it.
+  flagcv::flip(in, out, 1);
+
   cudaMemcpy(host, dst, sizeof(host), cudaMemcpyDeviceToHost);
-  for (unsigned char v : host) std::printf("%d ", v);  // 4 3 2 1 8 7 6 5
+  for (unsigned char v : host)
+    std::printf("%d ", v);
   std::printf("\n");
 
   cudaFree(src);
@@ -121,32 +107,57 @@ int main() {
 }
 ```
 
+Build and run:
+
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=/opt/flagcv
 cmake --build build
 ./build/flip_demo
 ```
 
-The first call for a kernel variant starts the compiler if needed and loads
-the resulting module. Cached calls enqueue work on the selected stream.
-For explicit device ownership, construct a `flagcv::Handle` and pass it as the
-first argument.
-See [the architecture](docs/architecture.md) for cache keys and ownership.
+Expected output:
 
-### Correctness and performance
+```text
+4 3 2 1 8 7 6 5
+```
 
-OpenCV CPU defines operator semantics. For Python kernel and C++ API timing,
-see [benchmarking](docs/benchmark.md). Current device and toolchain evidence
-is listed in the [operator inventory](docs/operators.md).
+For explicit device and stream management, use a `Handle`:
 
-### Environment variables
+```cpp
+flagcv::Handle handle("nvidia", 0);
+flagcv::flip(handle, in, out, 1, stream);
+```
+
+Both interfaces share the same runtime and kernel implementation. Compiled kernels are cached for subsequent execution.
+
+See [C++ Operator Interfaces](docs/cpp-operators.md) for more information.
+
+## Environment Variables
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `FLAGCV_PYTHON` | `python3` | Interpreter for the external compiler |
-| `FLAGCV_COMPILER_TIMEOUT_MS` | `120000` | Deadline for a compiler request, in milliseconds |
-| `FLAGCV_CACHE_DIR` | `~/.cache/flagcv` | Where compiled kernel binaries are written |
-| `FLAGCV_DATA_DIR` | `<prefix>/share/flagcv`, else the source tree | Kernel sources, compiler and platform providers |
-| `FLAGCV_PLUGIN_DIR` | `<prefix>/lib/flagcv`, else the build tree | Backend plugins (`libflagcv_<backend>.so`) |
+| `FLAGCV_PYTHON` | `python3` | Python interpreter for kernel compilation |
+| `FLAGCV_CACHE_DIR` | `~/.cache/flagcv` | Compiled kernel cache |
+| `FLAGCV_DATA_DIR` | Install prefix or source tree | Kernel and compiler resources |
+| `FLAGCV_PLUGIN_DIR` | Install prefix or build tree | Backend plugins |
+| `FLAGCV_COMPILER_TIMEOUT_MS` | `120000` | Compiler request timeout in milliseconds |
 
-See [docs/architecture.md](docs/architecture.md) for how the runtime, the compiler process and the plugins fit together, and [docs/operator-development.md](docs/operator-development.md) for adding an operator.
+## Documentation
+
+Refer to the following documentation for more information on using and developing FlagCV:
+
+- [Architecture](docs/architecture.md) — Runtime design, kernel compilation, and multi-backend support.
+- [Operator Inventory](docs/operators.md) — Supported operators and hardware platforms.
+- [Operator Development](docs/operator-development.md) — Adding and optimizing operators.
+- [Testing](docs/testing.md) — Correctness testing and backend validation.
+- [Benchmarking](docs/benchmark.md) — Performance testing and comparison methods.
+
+## Contribution
+
+Contributions to FlagCV are welcome. Please refer to the [Contribution Guide](CONTRIBUTING.md) for development guidelines.
+
+Please file an issue for feature requests or bug reports.
+
+## License
+
+FlagCV is licensed under the [Apache License (Version 2.0)](LICENSE).

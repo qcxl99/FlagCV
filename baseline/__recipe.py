@@ -25,8 +25,8 @@ def recipe(workload):
         dtypes.setdefault(dtype, None)
 
     def native():
-        if not torch.cuda.is_available() or torch.version.hip or not torch.version.cuda:
-            return None
+        if not torch.version.cuda or torch.version.hip or not torch.cuda.is_available():
+            raise RuntimeError("FlagCV OpenCV CUDA recipe requires CUDA Torch and an NVIDIA device")
 
         def run(prepared):
             return prepared()
@@ -42,6 +42,7 @@ def recipe(workload):
         dst_index = 1 if op in ("flip", "bitwise_not") else 2
         dst = args[dst_index]
         expected = torch.empty_like(dst)
+        snapshots = tuple(source.clone() for source in args[:dst_index])
         got = get_reference(op, dst.device)(*args[:dst_index], expected, *args[dst_index + 1:])
         prepared = prepare(op, args)
         try:
@@ -51,15 +52,27 @@ def recipe(workload):
                 dst.copy_(got ^ 0x80)
             else:
                 dst.view(torch.int32).copy_(~got.view(torch.int32))
-            compare(prepared(), got)
+            result = prepared()
+            if result is not dst:
+                raise RuntimeError("OpenCV CUDA bridge did not return the preallocated output")
+            compare(result, got)
+            for source, before in zip(args[:dst_index], snapshots):
+                assert_bitwise_equal(source, before)
         except BaseException:
             prepared.close()
             raise
         return (prepared,), {}
 
     def config(binding, dtype):
-        return cases[binding][dtype][1]["config"]
+        record = cases[binding].get(dtype)
+        return record[1]["config"] if record else None
+
+    def resource_descriptor(prepared):
+        tensors = {value.data_ptr(): value for value in prepared.args if isinstance(value, torch.Tensor)}
+        return (sum(value.numel() * value.element_size() for value in tensors.values()),
+                {"baseline_source": "opencv_cuda_live", "baseline_version": prepared.version})
 
     return SimpleNamespace(OP_NAME=op, DTYPES=tuple(dtypes), IS_INPLACE=False,
                            native=native, grid=grid, build_inputs=build_inputs,
-                           key_shape=lambda binding: binding, config=config)
+                           key_shape=lambda binding: binding, config=config,
+                           resource_descriptor=resource_descriptor)

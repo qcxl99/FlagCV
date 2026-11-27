@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flagcv"
+version = "0.1.0"
+description = "FlagCV source-checkout evaluation metadata for Optest"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+test = ["opencv-python-headless>=4.8,<4.12", "pytest", "PyYAML"]
+
+[tool.setuptools]
+packages = ["flagcv", "flagcv._runtime"]
+package-dir = {"flagcv._runtime" = "runtime"}

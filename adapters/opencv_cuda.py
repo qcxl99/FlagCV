@@ -40,6 +40,16 @@ def _load_library(path):
     return lib
 
 
+def load_bridge():
+    path = os.environ.get("FLAGCV_OPENCV_LIBRARY") or (
+        Path(__file__).resolve().parents[1] / "build-opencv-cuda" / "libflagcv_opencv_cuda.so"
+    )
+    try:
+        return _load_library(str(Path(path).resolve()))
+    except (AttributeError, RuntimeError) as error:
+        raise RuntimeError(f"OpenCV CUDA bridge at {path}: {error}") from error
+
+
 class PreparedOperation:
     """GpuMat headers prepared once; no allocation or host copies in run()."""
 
@@ -82,14 +92,7 @@ class PreparedOperation:
         flip_code = index(args[-1]) if op_name == "flip" else 0
         # Only the sign is significant; normalize before passing a C int.
         flip_code = (flip_code > 0) - (flip_code < 0)
-        path = os.environ.get("FLAGCV_OPENCV_LIBRARY")
-        if not path:
-            path = str(
-                Path(__file__).resolve().parents[1]
-                / "build-opencv-cuda"
-                / "libflagcv_opencv_cuda.so"
-            )
-        self.lib = _load_library(str(Path(path).resolve()))
+        self.lib = load_bridge()
         self.version = self.lib.flagcv_opencv_version().decode()
         with torch.cuda.device(self.device):
             self.handle = self.lib.flagcv_opencv_prepare(

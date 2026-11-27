@@ -1,18 +1,14 @@
-# FlagCV 合入标准
+# Contributing to FlagCV
 
-本仓库以独立的 CMake 库、公开 C++ API、Triton kernel 和验证工具交付。OpenCV
-模块合入遵循其上游流程。FlagCV PR 还需通过下列检查，并在 PR 附上对应证据。
-[OpenCV 贡献流程](https://github.com/opencv/opencv/wiki/How_to_contribute)
+欢迎提交缺陷修复、算子和平台改进。FlagCV 以独立 CMake 库、公开 C++ API、
+Triton kernel 和验证工具交付。
 
-| 检查 | FlagCV PR 的验收证据 |
-| --- | --- |
-| 接口和支持范围 | 更新算子清单，列出 dtype、通道、布局、参数默认值、掩码和原地语义。解释与 OpenCV CPU 可观察的差异，保留已有调用方式。 |
-| 公共 Runtime 和平台边界 | C++ API 经 lowering、registry、独立 compiler 和 backend。交付使用对应平台的 FlagTree。厂商扩展或专用编译选项放在相应 backend。 |
-| 执行路径 | 公开 API 的设备测试通过。证据涵盖冷编译与稳态复用、默认/原生 stream、输入保护、ROI 和目标写入范围。未注册时使用公版，已注册实现出错时将错误返回调用方。 |
-| 正确性 | 用 OpenCV CPU 比较所有声明的路径。整数和位操作逐位一致。浮点使用算子阈值。已确认的参考实现差异需列出精确范围、正式参考和回归用例。需要 ±1 LSB 时逐个模式说明原因、误差分布和用例。 |
-| 性能 | 分别提交 Python kernel 和 C++ API 的同设备逐用例结果。验证通过后再计时。有可比的发布或主分支数据时附逐例差异，并保留原始结果、GPU、工具链、workload 与计时方式。 |
-| 安装与文档 | 无 GPU 的 host CI 通过。安装包能由树外 `find_package(FlagCV)` 使用。更新 API 文档、复跑命令和算子清单。 |
-| 多平台声明 | 修改已交付的平台需复跑相应设备测试；新增平台提交 SDK/编译器、绑定和 stream、缓存、正确性及性能证据。预览状态写入支持清单。 |
+## 贡献流程
+
+1. 从主分支创建专题分支。缺陷修复记录复现方式，接口或平台变更先说明预期语义和支持范围。
+2. 按 [算子开发指南](docs/operator-development.md) 复用已有 lowering、registry 和公版 Triton kernel。厂商扩展及专用编译选项放在对应 backend。
+3. 运行 Host 检查及受改动影响的目标平台测试，更新 [支持清单](docs/operators.md)、接口说明和复现命令。
+4. 提交 PR 时附改动目的、受影响范围、实际测试命令、设备与工具链、结果链接及缺项。OpenCV 模块的合入遵循 [OpenCV 贡献流程](https://github.com/opencv/opencv/wiki/How_to_contribute)。
 
 ## 按改动范围验收
 
@@ -26,6 +22,8 @@
 | 新增算子或扩大支持范围 | 补公开声明、lowering、registry／provider、独立参考和两种入口的实现及测试。更新算子清单及正确性、性能用例。更新 `workloads/` 和 Optest 元数据。 |
 | 公共 Runtime、Compiler、Cache 或打包 | 按受影响的平台和算子声明验证公开 API 及树外安装。覆盖首次编译、复用与应重新编译的条件、缓存隔离、失败传播、默认与外部 stream、调用方资源和稳态同步边界。影响设备绑定时补多卡正反例。 |
 | 新增或调整 Backend | 标识实测 SDK、编译器及设备。验证驱动加载和释放、设备和 stream、编译产物、平台实现优先与公版选择、已注册路径出错、树外使用及实际可用的性能对照。缺少实卡证据时保留预览状态。 |
+
+按 [数值容差规范](docs/numerical-tolerance.md) 与 OpenCV CPU 比较受影响的声明路径。明确整数和位操作的逐位要求、浮点阈值及参考例外。测量前确认正确性，按 [性能测试规范](docs/benchmark.md) 分别报告 Python kernel 和 C++ API 的同设备逐用例结果，保留原始数据、用例、同步边界和可比性限制。
 
 共用 kernel 时优先复用符合公开语义的可移植 Triton 实现。记录来源版本和本地
 适配，确认签名、dtype、布局、边界与数值一致。FlagCV 通过自身 registry 和安装包

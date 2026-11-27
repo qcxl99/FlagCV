@@ -9,6 +9,8 @@ from functools import lru_cache
 from math import prod
 from pathlib import Path
 
+from helpers.launch_boundary import CURRENT_STREAM_OUT
+
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "compiler"))
 
@@ -160,6 +162,7 @@ def _prepare(op, vendor, args):
         return dst
 
     run.dispatch = {**metadata, "grid": grid}
+    run.execution_boundary = CURRENT_STREAM_OUT
     return run
 
 

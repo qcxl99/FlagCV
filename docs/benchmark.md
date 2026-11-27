@@ -28,13 +28,24 @@ Python 和六个 Optest recipe 共用 92 个 Core 用例。Case ID 由规范化�
 拥有各自的配置与标识。
 
 正式评价优先采用成功的同设备等价原生比较。原生运行失败时保留失败原因，
-可比的外部结果可供展示。没有等价原生实现时，按实际资源和精度核对外部
-基线 GPU、系数分母和目标芯片测量。串行 kernel 的利用率按执行时间加权。
-`--target-profile PATH` 可提供以 Case ID 索引的实测资源记录，在
-`cases[case_id]` 内保存 `vendor`、`chip`、`config`、`timing_protocol`
-和带持续时间的 `per_kernel` 利用率。计算资源还要求记录
-`resource_precision`。系数为目标设备实测资源值除以实际 NVIDIA 基线
-设备实测资源值。外部原始比值除以该系数得到 `compared_speedup`。
+可比的外部结果可供展示。默认 `normalization.basis=nvidia_reference`，
+按 NVIDIA 比较器实测的主导瓶颈选择同资源、同精度的实测系数，不要求目标侧
+再次 profiling。这是参考侧模型，不声称两端瓶颈一致。当前 collector 在与
+`do_bench` 一致的清缓存边界采集 NCU；只使用有依据的 DRAM 或标量 FP32。
+明确的 launch／缓存受限证据、多次调用的合并采样、主导资源不明确或缺必要
+计数器时不生成等效比值。DRAM 折算须有真实 DRAM 流量。工作集与 L2 容量
+关系用于说明适用范围。冷缓存采样中，工作集可放入 L2 本身不排除实测 DRAM
+访问。旧报告仍可核对原始比值。
+`--target-profile PATH` 可提供可选的双端诊断（`dual_profile`），在
+`cases[case_id]` 内保存 `vendor`、`chip`、`config`、`timing_protocol`、
+`resource_profile`（`source`、`cache_control: all`、可选 `exclusion`）和
+带 `T_us` 的 `per_kernel` 利用率（`U_cuda`、`U_tensor`、`U_mem`，单位 %）。
+计算资源还需 `resource_precision` 和 `resource_profile.precision_source`。目标测量
+存在但与参考不一致时不换算；没提供
+某个用例的诊断则仍可按参考换算。设备型号以实际属性核实，`OPTEST_TARGET_CHIP`
+只是调度标签；当前仅确认 Hygon `BW` / `gfx936` / 80 CU 对应 BW1000。
+系数为目标设备实测资源值除以实际 NVIDIA 基线设备实测资源值。外部原始比值
+除以该系数得到 `compared_speedup`。
 缺项保留 `base_miss_reason` 和可比的原始比值。汇总保留原生、等效、仅
 原始比值、缺失、不可比和失败的状态与分母。
 `tools/check_merge.py` 转发 `--base-data` 和 `--target-profile`，在

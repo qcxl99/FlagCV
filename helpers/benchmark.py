@@ -10,6 +10,7 @@ import pytest
 from conftest import emit
 from helpers.baseline import comparison, external_result, read_json, summarize
 from helpers.benchmark_protocol import MEASUREMENT_MS, PROFILES, STATEFUL_PROTOCOL
+from helpers.launch_boundary import CURRENT_STREAM_OUT
 from workloads.core import python_cases
 
 
@@ -163,12 +164,31 @@ def _measure_stateful(run, args, mutated):
 
 
 def _target(args, vendor):
-    if args[0].device.type != "cuda":
+    if not args or getattr(getattr(args[0], "device", None), "type", None) != "cuda":
         return None
     import torch
+    from runtime.identity import observe
 
-    name = torch.cuda.get_device_name(args[0].device)
-    return {"vendor": vendor, "chip": name.removeprefix("NVIDIA "), "name": name}
+    return observe(vendor, torch, args[0].device)
+
+
+def _aten_candidate_boundary(candidate, args):
+    if getattr(candidate, "execution_boundary", None) is not CURRENT_STREAM_OUT:
+        return False
+    return _check_stream_allocation(candidate, args)
+
+
+def _check_stream_allocation(function, args):
+    import torch
+
+    device = args[0].device
+    with torch.cuda.device(device):
+        stream = torch.cuda.current_stream(device)
+        before = torch.cuda.memory_allocated(device)
+        torch.cuda.reset_peak_memory_stats(device)
+        result = function(*args)
+        return (result is args[-1] and torch.cuda.current_stream(device) == stream
+                and torch.cuda.max_memory_allocated(device) == before)
 
 
 def _time_case(config, op_name, candidate, args, row):
@@ -189,9 +209,9 @@ def _time_case(config, op_name, candidate, args, row):
     if native_mode == "none":
         native_status, native_reason = "disabled", "native timing disabled"
     candidate_samples, baseline_samples, stateful_samples = [], [], []
-    _validate_outputs(op_name, candidate, args, None, None)
     if hasattr(candidate, "prepare"):
         candidate = candidate.prepare(*args)
+    _validate_outputs(op_name, candidate, args, None, None)
     baseline_version = None
     native_comparator = None
     prepare_native = None
@@ -202,8 +222,9 @@ def _time_case(config, op_name, candidate, args, row):
     elif native_mode == "auto" and vendor in ("amd", "hygon"):
         from adapters import aten_hip
 
-        native_status, native_reason = aten_hip.qualification(
-            op_name, args, row["dtype"], vendor, getattr(candidate, "source", None))
+        native_status, native_reason = aten_hip.qualification(op_name, args, row["dtype"], vendor)
+        if native_status == "eligible" and not _aten_candidate_boundary(candidate, args):
+            native_status, native_reason = "pending", "candidate current-stream/preallocated launch boundary not verified"
         if native_status == "eligible":
             native_comparator = "aten_hip_out"
             prepare_native = partial(aten_hip.prepare, op_name, args)
@@ -241,6 +262,8 @@ def _time_case(config, op_name, candidate, args, row):
                 baseline, baseline_args = prepare_native()
                 baseline_version = baseline.version
                 _validate_outputs(op_name, None, args, baseline, baseline_args)
+                if native_comparator == "aten_hip_out" and not _check_stream_allocation(baseline, baseline_args):
+                    raise RuntimeError("ATen changed the output, current stream or allocated temporary device memory")
                 native_status, native_reason = "passed", None
             except Exception as error:
                 native_status, native_reason = "failed", str(error)
@@ -265,7 +288,8 @@ def _time_case(config, op_name, candidate, args, row):
     base = config.getoption("base_data")
     target_profile = config.getoption("target_profile")
     observations = read_json(target_profile).get("cases", {}) if target_profile else {}
-    external = external_result(base, row, latency, protocol, _target(args, vendor) if base else None,
+    target = _target(args, vendor)
+    external = external_result(base, row, latency, protocol, target,
                                observations.get(row["case_id"]))
     return {
         "latency": latency, "latency_base": native_latency, "speedup": native_speedup,
@@ -277,6 +301,7 @@ def _time_case(config, op_name, candidate, args, row):
         "baseline_source": native_comparator if native_status == "passed" else None,
         "native_comparator": native_comparator,
         "baseline_version": baseline_version, "accuracy_checked": True,
+        "device_identity": target,
         "kernel_dispatch": getattr(candidate, "dispatch", None),
         **external, **comparison(native_status, native_reason, native_speedup, external),
     }
